@@ -2,30 +2,19 @@ import { HttpStatus } from '@nestjs/common';
 import { RetryableHttpException } from '../common/http/retryable.exception.js';
 import { loadConfig } from '../config/configuration.js';
 
-// Redis yerine bellekte sayaç tutan sahte pipeline.
-const counters = new Map<string, number>();
+// Lua betiğinin kendisi gerçek Redis'le test/security.e2e-spec.ts içinde sınanır;
+// burada sadece betiğe giden argümanlar ve sonucun HTTP hatasına çevrilmesi.
+const consumeRateLimit = vi.fn();
+let redisCreated = false;
 vi.mock('../common/redis/create-redis.js', () => ({
-  createRedis: () => ({
-    pipeline() {
-      const ops: Array<() => [null, number]> = [];
-      const chain = {
-        incrby(key: string, by: number) {
-          ops.push(() => {
-            counters.set(key, (counters.get(key) ?? 0) + by);
-            return [null, counters.get(key)!];
-          });
-          return chain;
-        },
-        expire() {
-          ops.push(() => [null, 1]);
-          return chain;
-        },
-        exec: async () => ops.map((op) => op()),
-      };
-      return chain;
-    },
-    quit: async () => undefined,
-  }),
+  createRedis: () => {
+    redisCreated = true;
+    return {
+      defineCommand: () => undefined,
+      consumeRateLimit,
+      quit: async () => undefined,
+    };
+  },
 }));
 
 const { UserRateLimiter } = await import('./user-rate-limiter.js');
@@ -39,13 +28,35 @@ const limiter = (limit: number) => {
 };
 
 describe('UserRateLimiter', () => {
-  beforeEach(() => counters.clear());
+  beforeEach(() => {
+    consumeRateLimit.mockReset().mockResolvedValue([]);
+    redisCreated = false;
+  });
 
-  it('sınıra kadar kabul eder, aşılınca 429 ve pencere sonuna kadar Retry-After', async () => {
-    const rl = limiter(3);
-    await rl.consume(new Map([['u1', 3]]));
+  it('her kullanıcı için sayaç anahtarı, sınır, TTL ve konum sayısını gönderir', async () => {
+    await limiter(3).consume(
+      new Map([
+        ['u1', 2],
+        ['u2', 5],
+      ]),
+    );
+    const [numKeys, k1, k2, limit, ttl, c1, c2] =
+      consumeRateLimit.mock.calls[0];
+    expect(numKeys).toBe(2);
+    expect(k1).toMatch(/^geofence:rl:u1:\d+$/);
+    expect(k2).toMatch(/^geofence:rl:u2:\d+$/);
+    expect([limit, ttl, c1, c2]).toEqual([3, 120, 2, 5]);
+  });
+
+  it('sınıra ulaşan kullanıcı varsa 429, adıyla ve pencere sonuna kadar Retry-After', async () => {
+    consumeRateLimit.mockResolvedValue([2]);
     try {
-      await rl.consume(new Map([['u1', 1]]));
+      await limiter(3).consume(
+        new Map([
+          ['u1', 1],
+          ['u2', 1],
+        ]),
+      );
       expect.unreachable();
     } catch (err) {
       expect(err).toBeInstanceOf(RetryableHttpException);
@@ -53,32 +64,16 @@ describe('UserRateLimiter', () => {
       expect(e.getStatus()).toBe(HttpStatus.TOO_MANY_REQUESTS);
       expect(e.retryAfterSeconds).toBeGreaterThan(0);
       expect(e.retryAfterSeconds).toBeLessThanOrEqual(60);
-      expect(e.message).toMatch(/u1/);
+      expect(e.message).toMatch(/u2/);
+      expect(e.message).not.toMatch(/u1/);
     }
-  });
-
-  it('kullanıcılar birbirinin sınırını etkilemez', async () => {
-    const rl = limiter(2);
-    await rl.consume(new Map([['u1', 2]]));
-    await expect(rl.consume(new Map([['u2', 2]]))).resolves.toBeUndefined();
-  });
-
-  it('toplu istekte bir kullanıcı aşarsa tamamı reddedilir', async () => {
-    const rl = limiter(2);
-    await expect(
-      rl.consume(
-        new Map([
-          ['u1', 1],
-          ['u2', 3],
-        ]),
-      ),
-    ).rejects.toThrow(/u2/);
   });
 
   it('sınır 0 ise Redis kullanılmaz ve her şey kabul edilir', async () => {
     await expect(
       limiter(0).consume(new Map([['u1', 1_000]])),
     ).resolves.toBeUndefined();
-    expect(counters.size).toBe(0);
+    expect(redisCreated).toBe(false);
+    expect(consumeRateLimit).not.toHaveBeenCalled();
   });
 });

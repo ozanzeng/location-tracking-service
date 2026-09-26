@@ -24,6 +24,8 @@ export class QueueBackpressure implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(QueueBackpressure.name);
   private timer: NodeJS.Timeout | null = null;
   private backlog = 0;
+  /** Redis yanıt vermezken her aralıkta yeni okuma başlatılıp çağrılar birikmesin. */
+  private refreshing = false;
 
   constructor(
     @InjectQueue(LOCATION_QUEUE) private readonly queue: Queue,
@@ -43,12 +45,16 @@ export class QueueBackpressure implements OnModuleInit, OnModuleDestroy {
   }
 
   async refresh(): Promise<void> {
+    if (this.refreshing) return;
+    this.refreshing = true;
     try {
       this.backlog = await this.queue.getWaitingCount();
       queueBacklog.set(this.backlog);
     } catch (err) {
       // Okunamazsa son değer korunur; Redis gerçekten düştüyse kuyruğa ekleme zaten hata verir.
       this.logger.warn(`Kuyruk derinliği okunamadı: ${(err as Error).message}`);
+    } finally {
+      this.refreshing = false;
     }
   }
 

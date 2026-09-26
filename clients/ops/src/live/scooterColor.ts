@@ -1,10 +1,20 @@
 import type { AreaType } from '@shared/api/types';
 import { dominantZone } from '@shared/zones/zoneStyles';
 
+/**
+ * Hizmet bölgesi dışında mı? Sürüş yasak bölge hizmet bölgesinin dışına taşabilir; orada
+ * duran scooter "yasak bölgede" sayılır (kırmızı), "hizmet dışı" (gri) değil. Harita rengi
+ * ve sayaç aynı kuralı kullanır.
+ */
+export function isOutsideService(types: Iterable<AreaType>): boolean {
+  const set = new Set(types);
+  return !set.has('SERVICE') && !set.has('NO_RIDE');
+}
+
 /** Scooter noktasının rengi: içinde bulunduğu en kısıtlayıcı bölge; hizmet bölgesi dışı gri. */
 export function scooterColor(types: Iterable<AreaType>): string {
   const set = new Set(types);
-  if (!set.has('SERVICE') && !set.has('NO_RIDE')) return '#8A8F98';
+  if (isOutsideService(set)) return '#8A8F98';
   const zone = dominantZone(set);
   if (zone === 'NO_RIDE') return '#D7263D';
   if (zone === 'SLOW') return '#F2A900';

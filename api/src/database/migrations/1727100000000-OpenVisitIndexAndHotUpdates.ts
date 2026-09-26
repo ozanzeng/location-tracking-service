@@ -20,6 +20,7 @@ export class OpenVisitIndexAndHotUpdates1727100000000 implements MigrationInterf
   transaction = false as const;
 
   public async up(queryRunner: QueryRunner): Promise<void> {
+    await dropIfInvalid(queryRunner, 'area_logs_open_entry_idx');
     await queryRunner.query(
       `CREATE INDEX CONCURRENTLY IF NOT EXISTS area_logs_open_entry_idx
          ON area_logs (entry_time DESC, id DESC) WHERE exit_time IS NULL`,
@@ -42,11 +43,31 @@ export class OpenVisitIndexAndHotUpdates1727100000000 implements MigrationInterf
     await queryRunner.query(
       `ALTER TABLE user_last_location RESET (fillfactor, autovacuum_vacuum_scale_factor, autovacuum_analyze_scale_factor)`,
     );
+    await dropIfInvalid(queryRunner, 'user_last_location_recorded_idx');
     await queryRunner.query(
       `CREATE INDEX CONCURRENTLY IF NOT EXISTS user_last_location_recorded_idx ON user_last_location (recorded_at DESC)`,
     );
     await queryRunner.query(
       `DROP INDEX CONCURRENTLY IF EXISTS area_logs_open_entry_idx`,
     );
+  }
+}
+
+/**
+ * CONCURRENTLY yarıda kalırsa (zaman aşımı, bağlantı kopması, deploy iptali) index INVALID
+ * olarak kalır: sorgular kullanmaz ama yazmalar onu güncellemeye devam eder. IF NOT EXISTS
+ * onu "var" sayıp atlayacağı için migration tekrar çalıştırıldığında önce kaldırılır.
+ */
+async function dropIfInvalid(
+  queryRunner: QueryRunner,
+  name: string,
+): Promise<void> {
+  const invalid: unknown[] = await queryRunner.query(
+    `SELECT 1 FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid
+      WHERE c.relname = $1 AND NOT i.indisvalid`,
+    [name],
+  );
+  if (invalid.length > 0) {
+    await queryRunner.query(`DROP INDEX CONCURRENTLY IF EXISTS ${name}`);
   }
 }

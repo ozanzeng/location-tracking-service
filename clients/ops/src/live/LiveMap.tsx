@@ -7,7 +7,8 @@ import { Legend } from '@shared/zones/Legend';
 import { EventFeed } from './EventFeed';
 import { LiveStats } from './LiveStats';
 import { MapRef } from './MapRef';
-import { ScooterLayer, type Counts, type Scooter } from './ScooterLayer';
+import { ScooterLayer, type Scooter } from './ScooterLayer';
+import type { Counts } from './scooterCounts';
 import { useEventFeed } from './useEventFeed';
 import { useSocketConnected } from './useSocketConnected';
 
@@ -16,7 +17,7 @@ export function LiveMap() {
   const { areas } = useAreas();
   const scooters = useRef(new Map<string, Scooter>());
   const mapRef = useRef<L.Map | null>(null);
-  const [counts, setCounts] = useState<Counts>({ total: 0 });
+  const [counts, setCounts] = useState<Counts>({ total: 0, outside: 0 });
   const feed = useEventFeed();
   const connected = useSocketConnected();
 

@@ -1,7 +1,9 @@
 import { getQueueToken } from '@nestjs/bullmq';
 import type { INestApplication } from '@nestjs/common';
 import type { Queue } from 'bullmq';
+import { Redis } from 'ioredis';
 import request from 'supertest';
+import { loadConfig } from '../src/config/configuration.js';
 import { LOCATION_JOB, LOCATION_QUEUE } from '../src/queue/location-job.js';
 import {
   createTestApp,
@@ -11,6 +13,7 @@ import {
 } from './helpers.js';
 
 const KEY = 'test-key';
+const DRIVER_KEY = 'test-driver-key';
 // Rate limit sayaçları Redis'te dakikalık tutulur; koşular birbirini etkilemesin.
 const run = Date.now().toString(36);
 const location = (userId: string) => ({
@@ -30,7 +33,12 @@ describe('Güvenlik ve gözlemlenebilirlik (e2e)', () => {
     app = await createTestApp({
       config: (c) => ({
         ...c,
-        security: { ...c.security, apiKeys: [KEY], userRateLimitPerMinute: 3 },
+        security: {
+          ...c.security,
+          apiKeys: [KEY],
+          ingestApiKeys: [DRIVER_KEY],
+          userRateLimitPerMinute: 3,
+        },
       }),
     });
     await resetState(app);
@@ -54,6 +62,32 @@ describe('Güvenlik ve gözlemlenebilirlik (e2e)', () => {
         .get('/areas')
         .set('x-api-key', KEY)
         .expect(200);
+    });
+
+    it('sürücü anahtarı konum gönderip alanları okur, başka hiçbir şeye erişemez', async () => {
+      const server = app.getHttpServer();
+      await post('/locations', location(`drv-${run}`), DRIVER_KEY).expect(202);
+      await post(
+        '/locations/batch',
+        { locations: [location(`drv-${run}`)] },
+        DRIVER_KEY,
+      ).expect(202);
+      await request(server)
+        .get('/areas')
+        .set('x-api-key', DRIVER_KEY)
+        .expect(200);
+
+      for (const path of ['/logs', '/locations/latest']) {
+        await request(server)
+          .get(path)
+          .set('x-api-key', DRIVER_KEY)
+          .expect(403);
+      }
+      await post(
+        '/areas',
+        { name: 'x', type: 'PARKING', geometry: {} },
+        DRIVER_KEY,
+      ).expect(403);
     });
 
     it('health ve metrics anahtar istemez', async () => {
@@ -82,9 +116,43 @@ describe('Güvenlik ve gözlemlenebilirlik (e2e)', () => {
       await post('/locations/batch', {
         locations: [location(user), location(user)],
       }).expect(202);
+      // Sayaç 2 < 3: istek kabul edilir, sayaç 4 olur.
       await post('/locations/batch', {
         locations: [location(user), location(user)],
-      }).expect(429);
+      }).expect(202);
+      await post('/locations', location(user)).expect(429);
+    });
+
+    it('sınırdan büyük birikmiş toplu istek pencere başında kabul edilir', async () => {
+      // Sınır 3 iken 5 konumluk istek hiç geçemeseydi cihazın kuyruğu sonsuza dek tıkanırdı.
+      const user = `backlog-${run}`;
+      await post('/locations/batch', {
+        locations: Array.from({ length: 5 }, () => location(user)),
+      }).expect(202);
+      await post('/locations', location(user)).expect(429);
+    });
+
+    it('reddedilen istek kotayı harcamaz', async () => {
+      const user = `norefund-${run}`;
+      const redis = new Redis(loadConfig().redisUrl);
+      const counter = async () => {
+        const keys = await redis.keys(`geofence-test:rl:${user}:*`);
+        const values = await Promise.all(keys.map((k) => redis.get(k)));
+        return values.reduce((sum, v) => sum + Number(v), 0);
+      };
+      try {
+        for (let i = 0; i < 3; i++) {
+          await post('/locations', location(user)).expect(202);
+        }
+        for (let i = 0; i < 3; i++) {
+          await post('/locations/batch', {
+            locations: [location(user), location(user)],
+          }).expect(429);
+        }
+        expect(await counter()).toBe(3);
+      } finally {
+        await redis.quit();
+      }
     });
   });
 

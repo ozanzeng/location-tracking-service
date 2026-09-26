@@ -30,8 +30,10 @@ export class AreasService {
       geom: dto.geometry,
     });
     const saved = await this.areas.save(area);
-    // Açık istemciler (sürücü, operasyon) yeni alanı sayfa yenilemeden görsün.
-    await this.publisher.publishAreasChanged({
+    // Açık istemciler (sürücü, operasyon) yeni alanı sayfa yenilemeden görsün. Yanıt
+    // yayını beklemez: alan kaydedildi; Redis erişilemezse istek asılı kalıp istemcinin
+    // tekrar denemesiyle aynı alan ikinci kez oluşmasın. Yayın hatası publisher'da loglanır.
+    void this.publisher.publishAreasChanged({
       created: { id: saved.id, name: saved.name, type: saved.type },
     });
     return saved;

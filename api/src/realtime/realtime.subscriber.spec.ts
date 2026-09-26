@@ -15,4 +15,16 @@ describe('RealtimeSubscriber.dispatch', () => {
     expect(() => subscriber.dispatch('{bozuk', [handler])).not.toThrow();
     expect(handler).not.toHaveBeenCalled();
   });
+
+  it('biçimi beklenmedik mesajda işleyici hata fırlatsa da süreci düşürmez, diğerleri çalışır', () => {
+    const failing = vi.fn((m: { events: unknown[] }) => {
+      for (const e of m.events) void e; // events yok: TypeError
+    });
+    const next = vi.fn();
+    expect(() =>
+      subscriber.dispatch('{"position":{}}', [failing, next]),
+    ).not.toThrow();
+    expect(failing).toHaveBeenCalled();
+    expect(next).toHaveBeenCalledWith({ position: {} });
+  });
 });

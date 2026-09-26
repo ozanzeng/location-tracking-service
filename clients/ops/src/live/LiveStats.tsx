@@ -1,8 +1,7 @@
-import type { Counts } from './ScooterLayer';
+import type { Counts } from './scooterCounts';
 
 /** Anlık sayaçlar: aktif scooter, sürüş yasak bölgede ve hizmet bölgesi dışında olanlar. */
 export function LiveStats({ counts }: { counts: Counts }) {
-  const outside = Math.max(0, counts.total - (counts.SERVICE ?? 0));
   return (
     <section className="stats" aria-label="Anlık durum">
       <div className="stat">
@@ -14,7 +13,7 @@ export function LiveStats({ counts }: { counts: Counts }) {
         <span>sürüş yasak bölgede</span>
       </div>
       <div className="stat">
-        <b className="num">{outside}</b>
+        <b className="num">{counts.outside}</b>
         <span>hizmet bölgesi dışında</span>
       </div>
     </section>

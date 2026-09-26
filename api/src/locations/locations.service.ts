@@ -7,6 +7,7 @@ import {
   LOCATION_QUEUE,
   type LocationJobData,
 } from '../queue/location-job.js';
+import { UserSequencer } from '../queue/user-sequencer.js';
 import { UserRateLimiter } from '../security/user-rate-limiter.js';
 import type { CreateLocationDto } from './dto/create-location.dto.js';
 import { buildLocationJobs, FutureTimestampError } from './location-jobs.js';
@@ -24,6 +25,7 @@ export class LocationsService {
     private readonly queue: Queue<LocationJobData>,
     private readonly rateLimiter: UserRateLimiter,
     private readonly backpressure: QueueBackpressure,
+    private readonly sequencer: UserSequencer,
   ) {}
 
   async enqueue(
@@ -31,9 +33,10 @@ export class LocationsService {
     requestId?: string,
     now = new Date(),
   ): Promise<{ jobId: string; recordedAt: string }> {
-    const [job] = this.build([dto], requestId, now);
+    const [built] = this.build([dto], requestId, now);
     this.backpressure.assertCapacity(1);
     await this.rateLimiter.consume(new Map([[dto.userId, 1]]));
+    const [job] = await this.withSequence([built]);
 
     const added = await this.queue.add(LOCATION_JOB, job);
     locationsAccepted.inc();
@@ -46,17 +49,26 @@ export class LocationsService {
     requestId?: string,
     now = new Date(),
   ): Promise<{ accepted: number; jobIds: string[] }> {
-    const jobs = this.build(dtos, requestId, now);
-    this.backpressure.assertCapacity(jobs.length);
+    const built = this.build(dtos, requestId, now);
+    this.backpressure.assertCapacity(built.length);
     await this.rateLimiter.consume(
-      new Map(jobs.map((job) => [job.userId, job.points.length])),
+      new Map(built.map((job) => [job.userId, job.points.length])),
     );
+    const jobs = await this.withSequence(built);
 
     const added = await this.queue.addBulk(
       jobs.map((data) => ({ name: LOCATION_JOB, data })),
     );
     locationsAccepted.inc(dtos.length);
     return { accepted: dtos.length, jobIds: added.map((j) => j.id!) };
+  }
+
+  /** Sıra no en son alınır: reddedilen istek sırada boşluk bırakıp sonrakini bekletmesin. */
+  private async withSequence(
+    jobs: LocationJobData[],
+  ): Promise<LocationJobData[]> {
+    const seqs = await this.sequencer.next(jobs.map((job) => job.userId));
+    return jobs.map((job, i) => ({ ...job, seq: seqs[i] }));
   }
 
   private build(

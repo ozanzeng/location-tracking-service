@@ -24,8 +24,10 @@ export class RealtimePublisher implements OnModuleDestroy {
   constructor(@Inject(APP_CONFIG) config: AppConfig) {
     this.updates = updatesChannel(config.queue.prefix);
     this.areas = areasChannel(config.queue.prefix);
+    // failFast: Redis düşükken yayınlar çevrimdışı kuyrukta birikip beklemesin; canlı yayın
+    // en iyi çabadır, kaçan mesajı istemciler bir sonraki konumla telafi eder.
     this.redis = config.realtime.enabled
-      ? createRedis(config.redisUrl, { lazyConnect: true })
+      ? createRedis(config.redisUrl, { lazyConnect: true, failFast: true })
       : null;
   }
 

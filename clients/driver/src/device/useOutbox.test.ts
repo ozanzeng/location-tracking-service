@@ -71,7 +71,7 @@ describe('useOutbox (cihaz gönderim kuyruğu)', () => {
     expect(result.current.pending).toBe(0);
   });
 
-  test('400 alınca o grup atılır (tekrar göndermek düzeltmez)', async () => {
+  test('400 alınca tek nokta atılır (tekrar göndermek düzeltmez)', async () => {
     sendLocations.mockRejectedValueOnce(new ApiError('lat hatalı', 400, null, 'r'));
     const { result } = renderHook(() => useOutbox(true));
     act(() => result.current.record(point(1)));
@@ -80,6 +80,54 @@ describe('useOutbox (cihaz gönderim kuyruğu)', () => {
     expect(result.current.log[0]).toMatchObject({ kind: 'error' });
     await tick(10_000);
     expect(sendLocations).toHaveBeenCalledTimes(1);
+  });
+
+  test('toplu istek tek hatalı nokta yüzünden 400 alırsa sadece o nokta atılır', async () => {
+    // Sunucu toplu doğrulamada hepsi-ya-hiçbiri: bir nokta hatalıysa istek bütünüyle 400.
+    const bad = point(37);
+    sendLocations.mockImplementation(async (points: LocationPoint[]) => {
+      if (points.includes(bad)) throw new ApiError('locations.37.lat hatalı', 400, null, 'r');
+      return { requestId: 'r' };
+    });
+    const { result, rerender } = renderHook(({ online }) => useOutbox(online), { initialProps: { online: false } });
+    const points = Array.from({ length: 100 }, (_, i) => (i === 37 ? bad : point(i)));
+    act(() => points.forEach((p) => result.current.record(p)));
+    rerender({ online: true });
+    await tick(20_000);
+    // İkiye bölme: 100 noktada tek hatalıyı bulmak ~log2(100) kat istek sürer.
+    expect(sendLocations.mock.calls.length).toBeLessThanOrEqual(20);
+
+    const delivered = sendLocations.mock.settledResults
+      .map((r, i) => (r.type === 'fulfilled' ? (sendLocations.mock.calls[i][0] as LocationPoint[]) : []))
+      .flat();
+    expect(delivered).toHaveLength(99);
+    expect(new Set(delivered)).toEqual(new Set(points.filter((p) => p !== bad)));
+    expect(result.current.pending).toBe(0);
+    expect(result.current.log.some((e) => e.kind === 'error' && e.text.includes('(400)'))).toBe(true);
+  });
+
+  test('gönderim sürerken kuyruk dolup baştan kırpılırsa gönderilmemiş noktalar silinmez', async () => {
+    let resolveSend: (v: { requestId: string }) => void = () => {};
+    sendLocations.mockImplementationOnce(() => new Promise((resolve) => (resolveSend = resolve)));
+    const { result, rerender } = renderHook(({ online }) => useOutbox(online), { initialProps: { online: false } });
+    act(() => {
+      for (let i = 0; i < 2000; i++) result.current.record(point(i));
+    });
+    rerender({ online: true });
+    await tick(0);
+    expect(sendLocations.mock.calls[0][0][0]).toEqual(point(0));
+
+    // İlk 100 gönderilirken 50 yeni konum: kuyruk 2000'i aşar, baştan 50 kırpılır.
+    act(() => {
+      for (let i = 2000; i < 2050; i++) result.current.record(point(i));
+    });
+    await act(async () => resolveSend({ requestId: 'r' }));
+    await tick(0);
+
+    // Kalan: gönderilmemiş 100..2049. Eski kod baştan 100 silip 100..149'u kaybediyordu.
+    expect(result.current.pending).toBe(1950);
+    await tick(1000);
+    expect(sendLocations.mock.calls[1][0][0]).toEqual(point(100));
   });
 
   test('ağ hatasında noktalar korunur ve 5 sn sonra tekrar denenir', async () => {

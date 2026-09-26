@@ -1,6 +1,7 @@
 import { BadRequestException } from '@nestjs/common';
 import type { Queue } from 'bullmq';
 import { LOCATION_JOB, type LocationJobData } from '../queue/location-job.js';
+import type { UserSequencer } from '../queue/user-sequencer.js';
 import type { UserRateLimiter } from '../security/user-rate-limiter.js';
 import { LocationsService } from './locations.service.js';
 import type { QueueBackpressure } from './queue-backpressure.js';
@@ -12,6 +13,7 @@ describe('LocationsService', () => {
   let addBulk: ReturnType<typeof vi.fn>;
   let consume: ReturnType<typeof vi.fn>;
   let assertCapacity: ReturnType<typeof vi.fn>;
+  let next: ReturnType<typeof vi.fn>;
   let service: LocationsService;
 
   beforeEach(() => {
@@ -23,10 +25,16 @@ describe('LocationsService', () => {
       );
     consume = vi.fn().mockResolvedValue(undefined);
     assertCapacity = vi.fn();
+    next = vi
+      .fn()
+      .mockImplementation(async (userIds: string[]) =>
+        userIds.map((_, i) => 10 + i),
+      );
     service = new LocationsService(
       { add, addBulk } as unknown as Queue<LocationJobData>,
       { consume } as unknown as UserRateLimiter,
       { assertCapacity } as unknown as QueueBackpressure,
+      { next } as unknown as UserSequencer,
     );
   });
 
@@ -45,6 +53,7 @@ describe('LocationsService', () => {
         userId: 'u',
         points: [{ lat: 1, lng: 2, recordedAt: '2026-09-25T06:59:00.000Z' }],
         requestId: 'req-1',
+        seq: 10,
       });
       expect(consume).toHaveBeenCalledWith(new Map([['u', 1]]));
     });
@@ -94,6 +103,18 @@ describe('LocationsService', () => {
       ).rejects.toThrow('dolu');
       expect(consume).not.toHaveBeenCalled();
     });
+
+    it('rate limit reddinde sıra no almaz (sırada boşluk sonraki işi bekletirdi)', async () => {
+      consume.mockRejectedValue(new Error('429'));
+      await expect(
+        service.enqueue(
+          { userId: 'u', lat: 1, lng: 2, timestamp: ts },
+          undefined,
+          now,
+        ),
+      ).rejects.toThrow('429');
+      expect(next).not.toHaveBeenCalled();
+    });
   });
 
   describe('enqueueBatch', () => {
@@ -125,13 +146,16 @@ describe('LocationsService', () => {
             { lat: 1, lng: 1, recordedAt: ts },
             { lat: 3, lng: 3, recordedAt: '2026-09-25T09:59:10.000Z' },
           ],
+          seq: 10,
         },
         {
           userId: 'b',
           requestId: 'req-2',
           points: [{ lat: 2, lng: 2, recordedAt: ts }],
+          seq: 11,
         },
       ]);
+      expect(next).toHaveBeenCalledWith(['a', 'b']);
       expect(assertCapacity).toHaveBeenCalledWith(2);
       expect(consume).toHaveBeenCalledWith(
         new Map([

@@ -53,4 +53,23 @@ describe('QueueBackpressure', () => {
     await bp.refresh();
     expect(() => bp.assertCapacity(1)).not.toThrow();
   });
+
+  it('önceki okuma bitmeden yenisini başlatmaz (Redis yanıt vermezken birikmez)', async () => {
+    let release: (n: number) => void = () => {};
+    const getWaitingCount = vi.fn(
+      () => new Promise<number>((resolve) => (release = resolve)),
+    );
+    const bp = withBacklog(5, getWaitingCount);
+    const first = bp.refresh();
+    await bp.refresh();
+    await bp.refresh();
+    expect(getWaitingCount).toHaveBeenCalledTimes(1);
+
+    release(10);
+    await first;
+    const second = bp.refresh();
+    expect(getWaitingCount).toHaveBeenCalledTimes(2);
+    release(3);
+    await second;
+  });
 });

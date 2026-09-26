@@ -74,4 +74,39 @@ describe('Migration’lar (boş veritabanı)', () => {
     expect(await ds.showMigrations()).toBe(false);
     expect(await tables()).toHaveLength(3);
   });
+
+  it('yarıda kalmış (INVALID) index tekrar çalıştırmada yeniden oluşturulur', async () => {
+    const valid = async () =>
+      (
+        await ds.query(
+          `SELECT i.indisvalid AS valid FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid
+            WHERE c.relname = 'area_logs_open_entry_idx'`,
+        )
+      ).map((r: { valid: boolean }) => r.valid);
+
+    await revertLastMigration(ds);
+    expect(await valid()).toEqual([]);
+
+    // Gerçek bir yarıda kalmış build: tekrarlanan veride UNIQUE CONCURRENTLY başarısız olur
+    // ve aynı adla INVALID bir index bırakır.
+    const [{ id }] = await ds.query(
+      `INSERT INTO areas (name, type, geom)
+       VALUES ('x', 'PARKING', ST_GeomFromText('POLYGON((0 0, 1 0, 1 1, 0 0))', 4326))
+       RETURNING id`,
+    );
+    await ds.query(
+      `INSERT INTO area_logs (user_id, area_id, entry_time, exit_time)
+       VALUES ('u', $1, now(), now()), ('u', $1, now(), now())`,
+      [id],
+    );
+    await expect(
+      ds.query(
+        `CREATE UNIQUE INDEX CONCURRENTLY area_logs_open_entry_idx ON area_logs (user_id)`,
+      ),
+    ).rejects.toThrow();
+    expect(await valid()).toEqual([false]);
+
+    await ds.runMigrations({ transaction: 'each' });
+    expect(await valid()).toEqual([true]);
+  });
 });

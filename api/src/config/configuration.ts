@@ -27,8 +27,14 @@ export interface AppConfig {
     flushIntervalMs: number;
   };
   security: {
-    /** Geçerli API anahtarları. Boşsa kimlik doğrulama kapalıdır (yerel geliştirme). */
+    /** Tam yetkili API anahtarları. Boşsa kimlik doğrulama kapalıdır (yerel geliştirme). */
     apiKeys: string[];
+    /**
+     * Sadece konum gönderebilen anahtarlar (sürücü uygulaması / cihaz): konum gönderir,
+     * alan listesini okur, kendi kullanıcı odasına abone olur. Loglar, alan oluşturma ve
+     * tüm filonun canlı yayını tam yetki ister.
+     */
+    ingestApiKeys: string[];
     /** İzin verilen CORS origin'leri; ['*'] hepsine izin verir, [] kapatır. */
     corsOrigins: string[];
     /** Kullanıcı başına dakikada kabul edilen konum sayısı; 0 kapatır. */
@@ -55,12 +61,26 @@ export class ConfigError extends Error {
 
 const LOG_LEVELS = ['fatal', 'error', 'warn', 'log', 'debug', 'verbose'];
 
+/** Production'da anahtarın en kısa uzunluğu: "dev-api-key" gibi tahmin edilebilir değerler geçmesin. */
+export const MIN_PRODUCTION_KEY_LENGTH = 16;
+
+export interface LoadConfigOptions {
+  /**
+   * API sunucusunun açılışı: anahtar kuralları sadece orada uygulanır. Worker, migration
+   * ve smoke betikleri anahtar kullanmaz; production'da API_KEYS olmadan da çalışmalılar.
+   */
+  apiServer?: boolean;
+}
+
 /**
  * Ortam değişkenlerinden ayarları okur ve doğrular. Verilmeyen değer için varsayılan
  * kullanılır; verilen ama geçersiz değer (ör. DB_PORT=abc) sessizce varsayılana düşmez,
  * ConfigError fırlatılır.
  */
-export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
+export function loadConfig(
+  env: NodeJS.ProcessEnv = process.env,
+  options: LoadConfigOptions = {},
+): AppConfig {
   const problems: string[] = [];
   const production = env.NODE_ENV === 'production';
 
@@ -106,10 +126,31 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   }
 
   const apiKeys = list('API_KEYS');
-  if (production && apiKeys.length === 0) {
-    problems.push(
-      'API_KEYS production ortamında zorunlu (virgülle ayrılmış bir veya daha fazla anahtar)',
+  const ingestApiKeys = list('INGEST_API_KEYS');
+  if (options.apiServer) {
+    if (production && apiKeys.length === 0) {
+      problems.push(
+        'API_KEYS production ortamında zorunlu (virgülle ayrılmış bir veya daha fazla anahtar)',
+      );
+    }
+    if (ingestApiKeys.length > 0 && apiKeys.length === 0) {
+      problems.push(
+        'INGEST_API_KEYS verildiyse API_KEYS de verilmeli (API_KEYS boşken doğrulama kapalıdır)',
+      );
+    }
+    if (ingestApiKeys.some((key) => apiKeys.includes(key))) {
+      problems.push(
+        'Aynı anahtar hem API_KEYS hem INGEST_API_KEYS içinde olamaz',
+      );
+    }
+    const weak = [...apiKeys, ...ingestApiKeys].filter(
+      (key) => key.length < MIN_PRODUCTION_KEY_LENGTH,
     );
+    if (production && weak.length > 0) {
+      problems.push(
+        `Production'da anahtarlar en az ${MIN_PRODUCTION_KEY_LENGTH} karakter olmalı; ${weak.length} anahtar daha kısa (ör. openssl rand -hex 24 ile üretin)`,
+      );
+    }
   }
 
   // Production'da açıkça verilmedikçe tarayıcıdan çapraz kaynak erişimi kapalı.
@@ -167,6 +208,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     },
     security: {
       apiKeys,
+      ingestApiKeys,
       corsOrigins,
       // 5 sn'de bir gönderen cihaz dakikada 12 istek atar; 5 kat pay bırakıldı. 0 kapatır.
       userRateLimitPerMinute: int('RATE_LIMIT_USER_PER_MIN', 60, 0, 100_000),
@@ -187,9 +229,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
 /** Süreç girişlerinde: ayarlar geçersizse sorunları yazıp çık (yığın izi yerine okunur mesaj). */
 export function loadConfigOrExit(
   env: NodeJS.ProcessEnv = process.env,
+  options: LoadConfigOptions = {},
 ): AppConfig {
   try {
-    return loadConfig(env);
+    return loadConfig(env, options);
   } catch (err) {
     if (err instanceof ConfigError) {
       console.error(err.message);

@@ -1,5 +1,6 @@
 import type { Area, AreaType, Health, LatestPosition, LocationPoint, LogEntry, LogQuery } from './types';
 import type { Polygon } from 'geojson';
+import { newRequestId } from './requestId';
 
 /** Sunucunun döndüğü hata; istemci Retry-After'a göre bekleyebilsin diye ayrıntılı. */
 export class ApiError extends Error {
@@ -17,7 +18,7 @@ const BASE = import.meta.env.VITE_API_URL ?? '/api';
 
 async function request<T>(path: string, init?: RequestInit): Promise<{ body: T; requestId: string | null }> {
   // Her isteğe kimlik: sunucu ve worker loglarında bu istek izlenebilir.
-  const requestId = crypto.randomUUID();
+  const requestId = newRequestId();
   let res: Response;
   try {
     res = await fetch(`${BASE}${path}`, {

@@ -5,6 +5,7 @@ import request from 'supertest';
 import { createTestApp, INSIDE, MODA_SQUARE, resetState } from './helpers.js';
 
 const KEY = 'ws-key';
+const DRIVER_KEY = 'ws-driver-key';
 
 describe('Canlı yayın (e2e)', () => {
   let app: INestApplication;
@@ -26,7 +27,11 @@ describe('Canlı yayın (e2e)', () => {
       config: (c) => ({
         ...c,
         realtime: { ...c.realtime, enabled: true, flushIntervalMs: 50 },
-        security: { ...c.security, apiKeys: [KEY] },
+        security: {
+          ...c.security,
+          apiKeys: [KEY],
+          ingestApiKeys: [DRIVER_KEY],
+        },
       }),
     });
     await resetState(app);
@@ -44,6 +49,24 @@ describe('Canlı yayın (e2e)', () => {
       socket.on('disconnect', resolve),
     );
     expect(reason).toBe('io server disconnect');
+  });
+
+  it('sürücü anahtarı kendi kullanıcı odasına girer, tüm filonun yayınına giremez', async () => {
+    const socket = connect(DRIVER_KEY);
+    await new Promise<void>((resolve) => socket.on('connect', () => resolve()));
+    expect(await socket.emitWithAck('subscribe', { userId: 'drv-1' })).toEqual({
+      ok: true,
+    });
+    expect(await socket.emitWithAck('subscribe', { monitor: true })).toEqual({
+      ok: false,
+      error: expect.stringMatching(/tam yetkili/),
+    });
+
+    const ops = connect(KEY);
+    await new Promise<void>((resolve) => ops.on('connect', () => resolve()));
+    expect(await ops.emitWithAck('subscribe', { monitor: true })).toEqual({
+      ok: true,
+    });
   });
 
   it('yeni alan oluşturulunca bağlı istemcilere duyurur', async () => {

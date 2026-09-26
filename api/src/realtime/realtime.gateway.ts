@@ -13,7 +13,11 @@ import {
 } from '@nestjs/websockets';
 import type { Server, Socket } from 'socket.io';
 import { APP_CONFIG, type AppConfig } from '../config/configuration.js';
-import { API_KEY_HEADER, isValidApiKey } from '../security/api-key.guard.js';
+import {
+  API_KEY_HEADER,
+  apiKeyScope,
+  type KeyScope,
+} from '../security/api-key.guard.js';
 import { PositionBuffer } from './position-buffer.js';
 import {
   MONITOR_ROOM,
@@ -68,9 +72,12 @@ export class RealtimeGateway
   handleConnection(client: Socket): void {
     const provided =
       client.handshake.headers[API_KEY_HEADER] ?? client.handshake.auth?.apiKey;
-    if (!isValidApiKey(this.config.security.apiKeys, provided)) {
+    const scope = apiKeyScope(this.config.security, provided);
+    if (!scope) {
       client.disconnect(true);
+      return;
     }
+    (client.data as { scope?: KeyScope }).scope = scope;
   }
 
   @SubscribeMessage('subscribe')
@@ -78,6 +85,14 @@ export class RealtimeGateway
     @ConnectedSocket() client: Socket,
     @MessageBody() payload: SubscribePayload,
   ) {
+    // Tüm filonun canlı yayını tam yetki ister; sürücü anahtarı sadece kullanıcı odasına girer.
+    const scope = (client.data as { scope?: KeyScope }).scope;
+    if (payload?.monitor && scope !== 'full') {
+      return {
+        ok: false,
+        error: 'monitor aboneliği tam yetkili anahtar ister',
+      };
+    }
     if (payload?.monitor) void client.join(MONITOR_ROOM);
     if (typeof payload?.userId === 'string' && payload.userId.length <= 64) {
       void client.join(userRoom(payload.userId));

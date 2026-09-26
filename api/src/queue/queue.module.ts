@@ -2,6 +2,7 @@ import { BullModule } from '@nestjs/bullmq';
 import { Module } from '@nestjs/common';
 import { APP_CONFIG, type AppConfig } from '../config/configuration.js';
 import { LOCATION_QUEUE } from './location-job.js';
+import { UserSequencer } from './user-sequencer.js';
 
 @Module({
   imports: [
@@ -24,6 +25,7 @@ import { LOCATION_QUEUE } from './location-job.js';
       },
     }),
   ],
-  exports: [BullModule],
+  providers: [UserSequencer],
+  exports: [BullModule, UserSequencer],
 })
 export class QueueModule {}

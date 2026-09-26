@@ -8,7 +8,7 @@ import { setupApp } from './setup-app.js';
 
 async function bootstrap() {
   // Ayarlar geçersizse Nest ayağa kalkmadan, sorunları listeleyerek çık.
-  const config = loadConfigOrExit();
+  const config = loadConfigOrExit(process.env, { apiServer: true });
   const app = await NestFactory.create(AppModule, { logger: createLogger() });
   setupApp(app);
   if (config.security.apiKeys.length === 0) {

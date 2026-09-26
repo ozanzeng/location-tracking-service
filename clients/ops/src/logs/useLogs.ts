@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '@shared/api/client';
 import type { AreaEvent, LogEntry } from '@shared/api/types';
 import { getSocket } from '@shared/realtime/socket';
@@ -7,6 +7,9 @@ import { toLogQuery, type LogFilters } from './logFilters';
 /**
  * GET /logs ile sayfalı giriş kayıtları. Liste açıkken gelen yeni girişler sayılır;
  * kullanıcı istediğinde yenilenir (liste kendiliğinden kaymaz).
+ * Yanıtlar farklı sırayla dönebilir: sadece en son başlatılan isteğin sonucu uygulanır.
+ * Böylece eski filtrenin geç gelen yanıtı ya da filtre değişmeden önce istenen sonraki
+ * sayfa, yeni filtrenin sonucunu ezmez.
  */
 export function useLogs(filters: LogFilters) {
   const [rows, setRows] = useState<LogEntry[]>([]);
@@ -14,19 +17,22 @@ export function useLogs(filters: LogFilters) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [newEntries, setNewEntries] = useState(0);
+  const latest = useRef(0);
 
   const load = useCallback(async (f: LogFilters, after?: string) => {
+    const id = ++latest.current;
     setLoading(true);
     setError(null);
     try {
       const page = await api.logs({ ...toLogQuery(f), cursor: after });
+      if (id !== latest.current) return;
       setRows((current) => (after ? [...current, ...page.data] : page.data));
       setCursor(page.nextCursor);
       if (!after) setNewEntries(0);
     } catch (err) {
-      setError((err as Error).message);
+      if (id === latest.current) setError((err as Error).message);
     } finally {
-      setLoading(false);
+      if (id === latest.current) setLoading(false);
     }
   }, []);
 
@@ -57,6 +63,7 @@ export function useLogs(filters: LogFilters) {
     newEntries,
     hasMore: cursor !== null,
     reload: () => void load(filters),
-    loadMore: () => cursor && void load(filters, cursor),
+    // Bir yükleme sürerken sonraki sayfa istenmez: imleç eski sonuca ait olabilir.
+    loadMore: () => cursor && !loading && void load(filters, cursor),
   };
 }

@@ -1,7 +1,13 @@
-import { UnauthorizedException, type ExecutionContext } from '@nestjs/common';
+import {
+  ForbiddenException,
+  UnauthorizedException,
+  type ExecutionContext,
+} from '@nestjs/common';
 import type { Reflector } from '@nestjs/core';
 import { loadConfig } from '../config/configuration.js';
 import { ApiKeyGuard } from './api-key.guard.js';
+import { INGEST_ALLOWED } from './ingest-allowed.decorator.js';
+import { IS_PUBLIC } from './public.decorator.js';
 
 const contextWith = (
   headers: Record<string, string | undefined>,
@@ -16,10 +22,20 @@ const contextWith = (
     }),
   }) as unknown as ExecutionContext;
 
-const guardWith = (apiKeys: string[], isPublic = false) =>
+const guardWith = (
+  apiKeys: string[],
+  isPublic = false,
+  { ingestApiKeys = [] as string[], ingestAllowed = false } = {},
+) =>
   new ApiKeyGuard(
-    { getAllAndOverride: () => isPublic } as unknown as Reflector,
-    { ...loadConfig({}), security: { ...loadConfig({}).security, apiKeys } },
+    {
+      getAllAndOverride: (key: string) =>
+        key === IS_PUBLIC ? isPublic : key === INGEST_ALLOWED && ingestAllowed,
+    } as unknown as Reflector,
+    {
+      ...loadConfig({}),
+      security: { ...loadConfig({}).security, apiKeys, ingestApiKeys },
+    },
   );
 
 describe('ApiKeyGuard', () => {
@@ -47,5 +63,28 @@ describe('ApiKeyGuard', () => {
 
   it('@Public uç noktalar anahtar istemez', () => {
     expect(guardWith(['k1'], true).canActivate(contextWith({}))).toBe(true);
+  });
+
+  describe('sürücü (INGEST_API_KEYS) anahtarı', () => {
+    const scoped = (ingestAllowed: boolean) =>
+      guardWith(['ops'], false, { ingestApiKeys: ['drv'], ingestAllowed });
+
+    it('konum gönderme gibi @IngestAllowed uç noktalara erişir', () => {
+      expect(
+        scoped(true).canActivate(contextWith({ 'x-api-key': 'drv' })),
+      ).toBe(true);
+    });
+
+    it('diğer uç noktalarda 403 (loglar, alan oluşturma)', () => {
+      expect(() =>
+        scoped(false).canActivate(contextWith({ 'x-api-key': 'drv' })),
+      ).toThrow(ForbiddenException);
+    });
+
+    it('tam yetkili anahtar her yere erişir', () => {
+      expect(
+        scoped(false).canActivate(contextWith({ 'x-api-key': 'ops' })),
+      ).toBe(true);
+    });
   });
 });

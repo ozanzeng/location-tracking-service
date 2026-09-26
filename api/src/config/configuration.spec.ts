@@ -62,11 +62,57 @@ describe('loadConfig doğrulama', () => {
     expect(problems).toHaveLength(4);
   });
 
-  it('production ortamında API_KEYS zorunludur', () => {
-    expect(problemsFor({ NODE_ENV: 'production' })).toEqual([
-      expect.stringMatching(/API_KEYS/),
-    ]);
-    expect(problemsFor({ NODE_ENV: 'production', API_KEYS: 'k1' })).toEqual([]);
+  describe('API anahtarları (sadece API sunucusu)', () => {
+    const strong = 'a'.repeat(16);
+    const apiProblems = (env: NodeJS.ProcessEnv): string[] => {
+      try {
+        loadConfig(env, { apiServer: true });
+        return [];
+      } catch (err) {
+        return (err as ConfigError).problems;
+      }
+    };
+
+    it('production ortamında API_KEYS zorunludur', () => {
+      expect(apiProblems({ NODE_ENV: 'production' })).toEqual([
+        expect.stringMatching(/API_KEYS/),
+      ]);
+      expect(apiProblems({ NODE_ENV: 'production', API_KEYS: strong })).toEqual(
+        [],
+      );
+    });
+
+    it('worker, migration ve smoke betikleri production’da anahtarsız açılır', () => {
+      // Migration anahtar kullanmaz; API_KEYS olmadan deploy'un ilk adımı düşmemeli.
+      expect(problemsFor({ NODE_ENV: 'production' })).toEqual([]);
+      expect(problemsFor({ NODE_ENV: 'production', API_KEYS: 'k' })).toEqual(
+        [],
+      );
+    });
+
+    it('production’da kısa/tahmin edilebilir anahtarı reddeder', () => {
+      expect(
+        apiProblems({ NODE_ENV: 'production', API_KEYS: 'dev-api-key' }),
+      ).toEqual([expect.stringMatching(/en az 16 karakter/)]);
+      expect(
+        apiProblems({
+          NODE_ENV: 'production',
+          API_KEYS: strong,
+          INGEST_API_KEYS: 'dev-driver-key',
+        }),
+      ).toEqual([expect.stringMatching(/en az 16 karakter/)]);
+      // Geliştirmede kısa anahtar serbest.
+      expect(apiProblems({ API_KEYS: 'dev-api-key' })).toEqual([]);
+    });
+
+    it('sürücü anahtarı tek başına ya da tam yetkili anahtarla aynı olamaz', () => {
+      expect(apiProblems({ INGEST_API_KEYS: 'd' })).toEqual([
+        expect.stringMatching(/API_KEYS de verilmeli/),
+      ]);
+      expect(apiProblems({ API_KEYS: 'a,b', INGEST_API_KEYS: 'b' })).toEqual([
+        expect.stringMatching(/hem API_KEYS hem INGEST_API_KEYS/),
+      ]);
+    });
   });
 
   it('geçerli CORS origin listesini kabul eder', () => {

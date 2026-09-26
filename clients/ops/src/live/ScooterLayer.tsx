@@ -5,6 +5,7 @@ import { api } from '@shared/api/client';
 import type { AreaType, Position } from '@shared/api/types';
 import { getSocket } from '@shared/realtime/socket';
 import { scooterColor } from './scooterColor';
+import { countScooters, type Counts } from './scooterCounts';
 
 /**
  * "Aktif" = son 60 saniyede konum göndermiş. Cihazlar 5 sn'de bir gönderir; 15 sn sessiz
@@ -19,8 +20,6 @@ export interface Scooter {
   types: AreaType[];
   seenAt: number;
 }
-
-export type Counts = { total: number } & Partial<Record<AreaType, number>>;
 
 /**
  * Scooter'ları Leaflet katmanında doğrudan günceller: yüzlerce konum saniyede birkaç kez
@@ -60,13 +59,7 @@ export function ScooterLayer({
       all.set(userId, { marker, types, seenAt });
     };
 
-    const publishCounts = () => {
-      const counts: Counts = { total: all.size };
-      for (const s of all.values()) {
-        for (const t of new Set(s.types)) counts[t] = (counts[t] ?? 0) + 1;
-      }
-      onCounts(counts);
-    };
+    const publishCounts = () => onCounts(countScooters(all.values()));
 
     let cancelled = false;
     // Açılışta sadece son 1 dakikada görülenler; "son görülme" konumun gerçek zamanı.

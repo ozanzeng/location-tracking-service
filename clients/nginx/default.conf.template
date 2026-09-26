@@ -9,7 +9,9 @@ server {
 
   location /api/ {
     proxy_pass http://api:3000/;
-    # nginx imajı başlangıçta API_KEY ortam değişkenini buraya yerleştirir.
+    # nginx imajı başlangıçta API_KEY ortam değişkenini buraya yerleştirir. Anahtar tarayıcı
+    # kodunda görünmez ama bu nginx'e erişen herkes onun yetkisiyle istek atar; bu yüzden
+    # sürücü uygulamasına sadece konum gönderebilen anahtar verilir (docker-compose.yml).
     proxy_set_header x-api-key "${API_KEY}";
     proxy_set_header Host $host;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;

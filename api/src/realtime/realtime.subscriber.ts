@@ -55,7 +55,12 @@ export class RealtimeSubscriber implements OnModuleInit, OnModuleDestroy {
     await this.redis?.quit();
   }
 
-  /** Bozuk bir mesaj olay işleyicisinde hata fırlatıp süreci düşürmesin; atlanır. */
+  /**
+   * Bozuk bir mesaj süreci düşürmesin; atlanır. ioredis 'message' dinleyicisinden kaçan
+   * hata yakalanmamış istisnadır ve API'yi düşürür. Bu yüzden JSON'u geçerli ama biçimi
+   * beklenmedik mesajda (ör. farklı sürümden yayın) işleyicinin hatası da yakalanır. Bir
+   * işleyicinin hatası diğerlerini engellemez.
+   */
   dispatch<T>(raw: string, handlers: Handler<T>[]): void {
     let message: T;
     try {
@@ -64,6 +69,14 @@ export class RealtimeSubscriber implements OnModuleInit, OnModuleDestroy {
       this.logger.warn('Geçersiz yayın mesajı atlandı');
       return;
     }
-    for (const handler of handlers) handler(message);
+    for (const handler of handlers) {
+      try {
+        handler(message);
+      } catch (err) {
+        this.logger.warn(
+          `Yayın mesajı işlenemedi, atlandı: ${(err as Error).message}`,
+        );
+      }
+    }
   }
 }

@@ -1,5 +1,9 @@
+import { getQueueToken } from '@nestjs/bullmq';
 import type { INestApplication } from '@nestjs/common';
+import type { Queue } from 'bullmq';
 import request from 'supertest';
+import { LOCATION_JOB, LOCATION_QUEUE } from '../src/queue/location-job.js';
+import { UserSequencer } from '../src/queue/user-sequencer.js';
 import { GeofenceService } from '../src/geofence/geofence.service.js';
 import {
   createTestApp,
@@ -161,6 +165,46 @@ describe('Konum → alan giriş/çıkış (e2e)', () => {
       ],
     );
     expect(await logsFor('u5')).toHaveLength(1);
+  });
+
+  it('aynı kullanıcının ayrı istekleri, sonraki önce kuyruğa girse de sırayla işlenir', async () => {
+    // Uzun kopukluktan sonra cihaz birikmiş konumları 100'lük isteklerle gönderir; paralel
+    // worker'lar sonraki isteği önce işlerse öncekinin noktaları "eski" sayılıp atlanırdı.
+    const queue = app.get<Queue>(getQueueToken(LOCATION_QUEUE));
+    const [first] = await app.get(UserSequencer).next(['u7']);
+    const [second] = await app.get(UserSequencer).next(['u7']);
+    const job = (seq: number, points: Array<[typeof INSIDE, number]>) => ({
+      userId: 'u7',
+      seq,
+      points: points.map(([p, s]) => ({ ...p, recordedAt: at(s) })),
+    });
+
+    await queue.add(LOCATION_JOB, job(second, [[OUTSIDE, 10]]));
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    await queue.add(
+      LOCATION_JOB,
+      job(first, [
+        [OUTSIDE, 0],
+        [INSIDE, 1],
+        [OUTSIDE, 2],
+      ]),
+    );
+    await waitForQueueDrain(app);
+
+    expect((await logsFor('u7')).map((l) => [l.entryTime, l.exitTime])).toEqual(
+      [[at(1), at(2)]],
+    );
+  });
+
+  it('eski biçimdeki (tek konumlu) iş kuyrukta kaldıysa da işlenir', async () => {
+    const queue = app.get<Queue>(getQueueToken(LOCATION_QUEUE));
+    await queue.add(LOCATION_JOB, {
+      userId: 'u8',
+      ...INSIDE,
+      recordedAt: at(0),
+    } as never);
+    await waitForQueueDrain(app);
+    expect(await logsFor('u8')).toHaveLength(1);
   });
 
   it('toplu istekte bir konum geçersizse hiçbirini almaz', async () => {

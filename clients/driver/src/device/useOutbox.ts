@@ -21,11 +21,17 @@ export interface DeviceLogEntry {
  * Cihazın gönderim kuyruğu. Konumlar önce sıraya girer, ardından gönderilir:
  * tek nokta POST /locations, birikmiş noktalar POST /locations/batch ile gider.
  * Ağ hatasında noktalar kaybolmaz; 429/503'te sunucunun Retry-After süresine uyulur.
+ * 400'de sadece sunucunun tek başına reddettiği nokta atılır.
  */
 export function useOutbox(online: boolean) {
   const queue = useRef<LocationPoint[]>([]);
   const inFlight = useRef(false);
   const retryAt = useRef(0);
+  /**
+   * 400'de grup ikiye bölünür, tek başına reddedilen nokta bulunana kadar küçülür;
+   * o nokta atılınca tam boyuta döner.
+   */
+  const batchLimit = useRef(MAX_BATCH);
   const nextLogId = useRef(0);
   const [pending, setPending] = useState(0);
   const [log, setLog] = useState<DeviceLogEntry[]>([]);
@@ -45,13 +51,24 @@ export function useOutbox(online: boolean) {
     [online, addLog],
   );
 
+  /**
+   * Gönderilen noktalar kuyruktan kimlikleriyle çıkarılır, konumlarıyla değil: gönderim
+   * sürerken kuyruk MAX_QUEUE'yu aşıp baştan kırpılırsa ilk N eleman artık gönderilenler değildir.
+   */
+  const remove = useCallback((points: LocationPoint[]) => {
+    const sent = new Set(points);
+    queue.current = queue.current.filter((p) => !sent.has(p));
+  }, []);
+
   const flush = useCallback(async () => {
     if (inFlight.current || !online || Date.now() < retryAt.current || queue.current.length === 0) return;
     inFlight.current = true;
-    const batch = queue.current.slice(0, MAX_BATCH);
+    const batch = queue.current.slice(0, batchLimit.current);
     try {
       const { requestId } = await api.sendLocations(batch);
-      queue.current.splice(0, batch.length);
+      remove(batch);
+      // Bölme sırasında sağlam çıkan grup: hatalı noktaya yaklaşırken grup yavaşça büyür.
+      batchLimit.current = Math.min(MAX_BATCH, batchLimit.current * 2);
       addLog(
         'sent',
         batch.length === 1 ? 'Konum gönderildi' : `Biriken ${batch.length} konum toplu gönderildi`,
@@ -67,9 +84,19 @@ export function useOutbox(online: boolean) {
           `${e.status === 429 ? 'Gönderim sınırı aşıldı' : 'Sunucu yoğun'}, ${wait} sn sonra tekrar denenecek (${e.status})`,
           e.requestId,
         );
+      } else if (e.status === 400 && batch.length > 1) {
+        // Sunucu toplu isteği tek bir hatalı nokta yüzünden bütünüyle reddeder;
+        // grubu ikiye bölüp tekrar dene, sağlam noktalar kaybolmasın.
+        batchLimit.current = Math.ceil(batch.length / 2);
+        addLog(
+          'error',
+          `Toplu gönderim reddedildi, ${batchLimit.current}'lik gruplarla denenecek: ${e.message} (400)`,
+          e.requestId,
+        );
       } else if (e.status === 400) {
-        // Aynı istek tekrar gönderilse de düzelmez; kuyruğu tıkamasın diye atılır.
-        queue.current.splice(0, batch.length);
+        // Tek nokta: tekrar gönderilse de düzelmez; kuyruğu tıkamasın diye atılır.
+        remove(batch);
+        batchLimit.current = MAX_BATCH;
         addLog('error', `Sunucu konumu reddetti: ${e.message} (400)`, e.requestId);
       } else {
         retryAt.current = Date.now() + NETWORK_RETRY_MS;
@@ -83,7 +110,7 @@ export function useOutbox(online: boolean) {
       inFlight.current = false;
       setPending(queue.current.length);
     }
-  }, [online, addLog]);
+  }, [online, addLog, remove]);
 
   useEffect(() => {
     if (online && queue.current.length > 0) {

@@ -3,11 +3,15 @@ import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
 
 const API = process.env.API_PROXY_TARGET ?? 'http://localhost:3000';
-// Anahtar tarayıcıya gömülmez; geliştirme proxy'si ekler (üretimde nginx).
-const API_KEY = process.env.API_KEY ?? 'dev-api-key';
 
-/** İki uygulamanın ortak Vite ayarı: @shared takma adı ve API proxy'si. */
-export function clientConfig(port: number) {
+/**
+ * İki uygulamanın ortak Vite ayarı: @shared takma adı ve API proxy'si. Anahtar tarayıcı
+ * koduna gömülmez; geliştirme proxy'si ekler (üretimde nginx). Sürücü uygulaması sadece
+ * konum gönderebilen anahtarı kullanır.
+ */
+export function clientConfig(port: number, app: 'ops' | 'driver') {
+  const API_KEY =
+    app === 'driver' ? (process.env.DRIVER_API_KEY ?? 'dev-driver-key') : (process.env.API_KEY ?? 'dev-api-key');
   return defineConfig({
     plugins: [react()],
     resolve: {

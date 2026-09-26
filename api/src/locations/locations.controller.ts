@@ -9,6 +9,7 @@ import {
 } from '@nestjs/swagger';
 import { ApiKeyAuth } from '../security/api-key-auth.decorator.js';
 import { RequestId } from '../common/http/request-id.decorator.js';
+import { IngestAllowed } from '../security/ingest-allowed.decorator.js';
 import { CreateLocationBatchDto } from './dto/create-location-batch.dto.js';
 import { CreateLocationDto } from './dto/create-location.dto.js';
 import { LatestLocationsQueryDto } from './dto/latest-query.dto.js';
@@ -32,6 +33,7 @@ export class LocationsController {
   ) {}
 
   @Post()
+  @IngestAllowed()
   @HttpCode(202)
   @ApiOperation({
     summary: 'Konum bildir',
@@ -48,6 +50,7 @@ export class LocationsController {
   }
 
   @Post('batch')
+  @IngestAllowed()
   @HttpCode(202)
   @ApiOperation({
     summary: 'Toplu konum bildir',

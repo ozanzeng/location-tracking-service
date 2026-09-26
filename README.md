@@ -22,7 +22,7 @@ docker compose up -d --build        # postgis, redis, migrate, api, 2 worker, op
 cd api && npm ci && npm run seed    # Kadıköy/Moda çevresinde 10 örnek alan
 ```
 
-- API ve Swagger: http://localhost:3000/docs. Yerel API anahtarı `dev-api-key`; Swagger'da "Authorize" ile girilir.
+- API ve Swagger: http://localhost:3000/docs. Yerel demo anahtarları: tam yetkili `dev-api-key` (operasyon, betikler) ve sadece konum gönderebilen `dev-driver-key` (sürücü uygulaması). Swagger'da "Authorize" ile girilir.
 - Operasyon uygulaması: http://localhost:8080
 - Sürücü uygulaması: http://localhost:8081. İkisini yan yana açıp sürücüde "Sürüşü başlat" deyin.
 - Sağlık ve kuyruk durumu: http://localhost:3000/health
@@ -63,9 +63,10 @@ flowchart LR
 | `GET /health` | DB, Redis ve kuyruk sayaçları. Anahtar istemez. |
 | `GET /metrics` | Prometheus metrikleri. Anahtar istemez; dışarıya açılmamalı. |
 
-Health ve metrics dışındaki tüm uç noktalar `x-api-key` başlığı ister. Olası hata yanıtları:
+Health ve metrics dışındaki tüm uç noktalar `x-api-key` başlığı ister. Sürücü anahtarı (`INGEST_API_KEYS`) sadece `POST /locations`, `POST /locations/batch` ve `GET /areas`'a erişir. Olası hata yanıtları:
 - `400`: doğrulama hatası
 - `401`: anahtar eksik veya yanlış
+- `403`: sürücü anahtarı bu uç noktaya yetkili değil
 - `429`: kullanıcı başına dakikalık sınır aşıldı
 - `503`: kuyruk dolu
 
@@ -133,11 +134,13 @@ curl -H "$H" 'localhost:3000/logs?userId=scooter-1'
 
 **Loglarda keyset sayfalama.** `GET /logs` OFFSET yerine `(entry_time, id)` cursor'ı kullanır. Log tablosu trafikle birlikte hızla büyüyeceği için bu önemli: sayfa derinleştikçe sorgu yavaşlamaz ve `(user_id | area_id, entry_time DESC, id DESC)` index'lerini doğrudan kullanır.
 
-**Ayarlar açılışta doğrulanır.** Ortam değişkenleri servis ayağa kalkmadan kontrol edilir. Verilmeyen değer için varsayılan kullanılır. Verilen ama geçersiz bir değer (ör. `DB_PORT=abc`, `REDIS_URL=http://...`, hatalı `CORS_ORIGINS`) sessizce varsayılana düşmez: servis bütün sorunları birlikte listeleyip 1 koduyla çıkar. Production'da `API_KEYS` zorunludur.
+**Ayarlar açılışta doğrulanır.** Ortam değişkenleri servis ayağa kalkmadan kontrol edilir. Verilmeyen değer için varsayılan kullanılır. Verilen ama geçersiz bir değer (ör. `DB_PORT=abc`, `REDIS_URL=http://...`, hatalı `CORS_ORIGINS`) sessizce varsayılana düşmez: servis bütün sorunları birlikte listeleyip 1 koduyla çıkar. Production'da API sunucusu `API_KEYS` olmadan ve 16 karakterden kısa bir anahtarla açılmaz. Worker, migration ve smoke betikleri anahtar kullanmadığı için bu kural onlara uygulanmaz.
 
 **Kuyruk ayarları.** Başarısız işler 3 kez, üstel artan bekleme süresiyle tekrar denenir. Tamamlanan işler Redis'te birikmez (`removeOnComplete`). Worker `concurrency` değeri env ile ayarlanır.
 
-**Toplu istekte sıra korunur.** Toplu istekteki konumlar kullanıcı başına tek işte, zamana göre sıralı tutulur ve worker bunları sırayla işler. Ayrı işler olsalardı paralel worker'lar yeni noktayı eskiden önce işleyebilirdi. O zaman eski nokta "geç gelmiş" sayılıp atlanır ve bir alan girişi kaçabilirdi; e2e testi bu durumu ters sırada gönderilen noktalarla doğruluyor. Ayrı isteklerde bu risk pratikte yok: 5 saniye arayla gelen iki istek arasına kuyrukta binlerce iş girer ve kuyruk FIFO çalıştığı için eskisi önce alınır.
+**Toplu istekte sıra korunur.** Toplu istekteki konumlar kullanıcı başına tek işte, zamana göre sıralı tutulur ve worker bunları sırayla işler. Ayrı işler olsalardı paralel worker'lar yeni noktayı eskiden önce işleyebilirdi. O zaman eski nokta "geç gelmiş" sayılıp atlanır ve bir alan girişi kaçabilirdi; e2e testi bu durumu ters sırada gönderilen noktalarla doğruluyor.
+
+**Aynı kullanıcının ayrı istekleri de sırayla işlenir.** Uzun bir kopukluktan sonra cihaz birikmiş konumları 100'lük istekler halinde art arda gönderir. Her istek ayrı bir iştir ve paralel worker'lar sonrakini öncekinden önce işleyebilir; bu durumda öncekinin noktaları "eski" sayılıp atlanır ve aradaki girişler/çıkışlar kaybolur. API her işe kullanıcı başına bir sıra numarası verir (Redis `INCR`, `api/src/queue/user-sequencer.ts`). Worker, sırası gelmemiş işi erteler; önceki iş bitince bekleyen ardılını hemen öne alır. Önceki iş 30 saniye boyunca hiç ilerlemezse (ör. sıra no alındıktan sonra kuyruğa eklenemediyse) kaybolmuş sayılır ve beklenmeden işlenir. Normal akışta (5 saniyede bir tek istek) hiçbir iş beklemez. e2e testi sonraki işi önce kuyruğa koyarak doğruluyor; sıra kontrolü kapatıldığında test kırmızıya düşüyor.
 
 **Kuyruk dolarsa yük reddedilir (backpressure).** Worker'lar uzun süre yetişemezse kuyruk sınırsız büyüyüp Redis belleğini doldururdu. Bekleyen iş sayısı `QUEUE_MAX_BACKLOG`'u (varsayılan 200.000) aşınca API yeni konumları `503 Retry-After: 5` ile reddeder. Kuyruk derinliği her istekte sorulmaz; saniyede bir arka planda okunur, böylece sıcak yola ek bir Redis çağrısı eklenmez.
 
@@ -167,9 +170,12 @@ Tasarım kararları, 3 milyon giriş kaydı ve 50 bin kullanıcılı ayrı bir b
 
 ## Güvenlik
 
-- **API anahtarı:** Servisin mobil uygulamanın backend'i veya bir API gateway tarafından çağrıldığı varsayıldı. İstemciler `x-api-key` ile doğrulanır. Anahtarlar sabit süreli karşılaştırılır, böylece karakter karakter tahmin edilemez. `API_KEYS` virgülle ayrılmış birden fazla anahtar alır, bu da anahtar değiştirirken eskisini kısa süre geçerli tutmayı sağlar. Tanımlı değilse doğrulama kapalıdır ve açılışta uyarı loglanır. Canlı yayın bağlantısı da aynı anahtarı el sıkışmada ister.
-- **Rate limit (kullanıcı başına):** Varsayılan dakikada 60 konum. 5 saniyede bir gönderen cihaz dakikada 12 istek atar, yani 5 kat pay var. Sınır IP'ye göre değil kullanıcıya göre uygulanır, çünkü mobil kullanıcılar operatör NAT'ı arkasında aynı IP'yi paylaşabilir. Sayaç Redis'te tutulduğu için birden fazla API instance'ı arasında ortaktır. IP bazlı genel koruma API gateway veya load balancer katmanının işidir.
-- **CORS:** Production'da varsayılan olarak kapalıdır; `CORS_ORIGINS` ile izin verilen adresler açıkça verilir. Demo istemcileri nginx üzerinden aynı adresten sunulduğu için CORS'a ihtiyaç duymaz. Anahtarı da nginx ekler, tarayıcıya hiç gönderilmez.
+- **API anahtarı:** Servisin mobil uygulamanın backend'i veya bir API gateway tarafından çağrıldığı varsayıldı. İstemciler `x-api-key` ile doğrulanır. Anahtarlar sabit süreli karşılaştırılır, böylece karakter karakter tahmin edilemez. `API_KEYS` virgülle ayrılmış birden fazla anahtar alır, bu da anahtar değiştirirken eskisini kısa süre geçerli tutmayı sağlar. Tanımlı değilse doğrulama kapalıdır ve açılışta uyarı loglanır. Canlı yayın bağlantısı da aynı anahtarı el sıkışmada ister. Production'da 16 karakterden kısa anahtar kabul edilmez; bu, `dev-api-key` gibi herkesin bildiği demo anahtarlarını engeller.
+- **İki yetki seviyesi:** `API_KEYS` tam yetkilidir. `INGEST_API_KEYS` ise sadece konum gönderir, alan listesini okur ve canlı yayında tek bir kullanıcının odasına abone olur. Logları okuyamaz, alan oluşturamaz, tüm filonun canlı yayınına giremez (`403`). Herkese açık bir istemcinin (sürücü uygulaması) anahtarı sızsa bile zarar sınırlı kalır.
+- **Rate limit (kullanıcı başına):** Varsayılan dakikada 60 konum. 5 saniyede bir gönderen cihaz dakikada 12 istek atar, yani 5 kat pay var. Sınır IP'ye göre değil kullanıcıya göre uygulanır, çünkü mobil kullanıcılar operatör NAT'ı arkasında aynı IP'yi paylaşabilir. Sayaç Redis'te tutulduğu için birden fazla API instance'ı arasında ortaktır. Kontrol ve artırma tek bir Lua betiğinde atomik yapılır. Sayacı sınırın altında olan kullanıcının isteği, sınırı tek başına aşsa bile kabul edilir; aksi halde uzun kopukluktan sonra gelen 100 konumluk toplu istek, 60'lık sınırla hiç geçemez ve cihazın kuyruğu kalıcı olarak tıkanırdı. Bu yüzden bir kullanıcı dakikada en fazla 60 - 1 + 100 konum gönderebilir. Reddedilen istek kotadan düşmez. IP bazlı genel koruma API gateway veya load balancer katmanının işidir.
+- **CORS:** Production'da varsayılan olarak kapalıdır; `CORS_ORIGINS` ile izin verilen adresler açıkça verilir. Demo istemcileri nginx üzerinden aynı adresten sunulduğu için CORS'a ihtiyaç duymaz.
+- **Demo istemcilerinin anahtarı:** Anahtarı nginx ekler; tarayıcı kodunda görünmez. Ama bu, anahtarı saklamak anlamına gelmez: o nginx'e erişebilen herkes anahtarın yetkisiyle istek atabilir. Bu yüzden herkese açık sürücü uygulamasına sadece `INGEST_API_KEYS` yetkisi verilir. Tam yetkili operasyon uygulaması production'da iç ağda, VPN'de ya da SSO arkasında yayınlanmalıdır.
+- **Demo ortamı production değil:** `docker compose` demo için `NODE_ENV=development` ve herkesin bildiği anahtarlarla çalışır. JSON log ve kapalı CORS gibi production davranışları ise compose'ta açıkça seçildi. Gerçek ortamda `NODE_ENV=production`, `API_KEY` ve `DRIVER_API_KEY` secret olarak verilir; kısa anahtarla API açılmaz.
 - `x-powered-by` başlığı kapalı; doğrulamada tanımsız alan içeren istekler reddedilir.
 
 ## Gözlemlenebilirlik
@@ -219,7 +225,7 @@ Sonuçların yorumu:
 
 ## Testler
 
-Hepsi tek komutla, yaklaşık 45 saniyede çalışır (stack ayakta olmalı):
+Hepsi tek komutla, yaklaşık 55 saniyede çalışır (stack ayakta olmalı):
 
 ```bash
 docker compose up -d --build
@@ -230,9 +236,9 @@ docker compose up -d --build
 
 | | Birim | E2E | Smoke (veri yazmaz*) |
 |---|---|---|---|
-| **Backend** | 81 test · `api: npm test` | 44 test · `api: npm run test:e2e` | `api: npm run smoke` |
-| **Veritabanı** | 18 test · `api: npm run test:db` | (backend e2e içinde) | `api: npm run smoke:db` |
-| **Frontend** | 55 test · `clients: npm run test:unit` | 18 tarayıcı testi · `clients: npm run test:ui` | `clients: npm run smoke` |
+| **Backend** | 105 test · `api: npm test` | 50 test · `api: npm run test:e2e` | `api: npm run smoke` |
+| **Veritabanı** | 19 test · `api: npm run test:db` | (backend e2e içinde) | `api: npm run smoke:db` |
+| **Frontend** | 63 test · `clients: npm run test:unit` | 18 tarayıcı testi · `clients: npm run test:ui` | `clients: npm run smoke` |
 
 \* Backend smoke testi, gerçek akışı denemek için tek bir sabit test alanı ve benzersiz bir test kullanıcısıyla konum gönderir.
 
@@ -240,14 +246,15 @@ Statik kontroller: `api: npm run lint && npm run typecheck` (testler dahil tam t
 
 **Backend birim** (Vitest):
 - Giriş/çıkış akışı (`GeofenceService`): kilit sırası; eski konumun atlanması; commit dayanıklılığının yalnızca giriş/çıkış yokken gevşetilmesi; olayların alan bilgisiyle üretilmesi.
-- Worker'ın noktaları sırayla işlemesi.
+- Worker'ın noktaları sırayla işlemesi; sırası gelmemiş işi erteleyip önceki bitince öne alması, önceki iş takılırsa beklemeyi bırakması; eski biçimdeki (tek konumlu) işleri de işlemesi.
 - Konum doğrulama, gruplama ve saat payı.
 - Kuyruk dolu koruması, kullanıcı başına rate limit, API anahtarı, istek kimliği, `Retry-After`.
-- Canlı yayın: bozuk Redis mesajında çökmeme, konum tamponu.
-- Ayar doğrulama, GeoJSON doğrulama, cursor.
+- Canlı yayın: bozuk ya da biçimi beklenmedik Redis mesajında çökmeme, konum tamponu.
+- Redis erişilemezken alan oluşturmanın yayını beklememesi, kuyruk derinliği okumalarının birikmemesi, worker metrik portu doluyken çökmeme.
+- Ayar doğrulama (anahtar kuralları sadece API sunucusunda), GeoJSON doğrulama, cursor.
 
 **Veritabanı** (gerçek PostGIS):
-- **Migration'lar:** boş bir veritabanında hepsi uygulanır, tamamen geri alınır ve tekrar uygulanır. Bu test, `CONCURRENTLY` index'li migration'ın geri alınamadığı bir hatayı yakaladı.
+- **Migration'lar:** boş bir veritabanında hepsi uygulanır, tamamen geri alınır ve tekrar uygulanır. Bu test, `CONCURRENTLY` index'li migration'ın geri alınamadığı bir hatayı yakaladı. Yarıda kalmış bir build'in bıraktığı INVALID index, migration tekrar çalışınca yeniden oluşturulur.
 - **Kısıtlar:** Uygulama hata yapsa bile veritabanı şunları reddeder: geçersiz poligon, yanlış geometri tipi, bilinmeyen alan tipi, çıkışın girişten önce olması, aynı alanda iki açık giriş, var olmayan alana giriş. Alan silinince kayıtları da silinir.
 - **Sorgu planı regresyonları (200 bin kayıtla):** kritik sorgular beklenen index'i kullanır, son konum güncellemeleri %95'ten fazla HOT'tur, `statement_timeout` uzun sorguyu keser.
 - **Veritabanı smoke:** bağlantı, PostGIS, bekleyen migration, gerekli ve geçerli (INVALID olmayan) index'ler, HOT ayarı, zaman aşımları, `synchronous_commit`.
@@ -256,22 +263,25 @@ Statik kontroller: `api: npm run lint && npm run typecheck` (testler dahil tam t
 - Case gereksinimlerinin madde madde doğrulanması (aşağıdaki tablo).
 - Giriş/çıkış/tekrar giriş, sırası karışık ve ileri tarihli konum, 50 paralel istekte tek giriş.
 - Toplu istek sırası, sayfalama ve filtreler.
-- API anahtarı (HTTP ve WebSocket), rate limit, `503` backpressure, metrikler, canlı yayın ve alan duyurusu.
+- Aynı kullanıcının ayrı işlerinin, sonraki önce kuyruğa girse de sırayla işlenmesi; eski biçimdeki işler.
+- API anahtarı ve sürücü anahtarının sınırları (HTTP ve WebSocket), rate limit (sınırdan büyük toplu istek, reddin kotadan düşmemesi), `503` backpressure, metrikler, canlı yayın ve alan duyurusu.
 
 **Frontend birim** (Vitest, hook'lar için jsdom):
-- **Gönderim kuyruğu (`useOutbox`):** çevrimdışı birikim ve tek toplu istek, 100'lük gruplar, `429`'da `Retry-After` kadar bekleme, `400`'de grubu atma, ağ hatasında noktaları kaybetmeme.
+- **Gönderim kuyruğu (`useOutbox`):** çevrimdışı birikim ve tek toplu istek, 100'lük gruplar, `429`'da `Retry-After` kadar bekleme, ağ hatasında noktaları kaybetmeme. Toplu istek tek hatalı nokta yüzünden `400` alırsa grup ikiye bölünür; sadece o nokta atılır. Gönderim sürerken kuyruk dolup baştan kırpılsa bile gönderilmemiş noktalar silinmez.
+- **Giriş kayıtları (`useLogs`):** eski filtrenin geç gelen yanıtı ya da önceki sonraki-sayfa isteği yeni sonucu ezmez.
+- **Canlı sayaçlar:** "hizmet bölgesi dışında" sayısı haritadaki gri noktalarla aynı kurala dayanır.
 - **Rota planlama (`useRoutePlanner`):** durak ekleme/silme, yasak bölge sınırı.
 - **Yol ağı:** yola yapıştırma, A*, yasak bölgeden kaçınma, gerçek Kadıköy verisi.
-- **API istemcisi:** tekli/toplu uç nokta, istek kimliği, `ApiError`.
+- **API istemcisi:** tekli/toplu uç nokta, istek kimliği (HTTPS olmayan bağlamda da, ör. telefondan LAN IP ile), `ApiError`.
 - **Diğer:** geometri, sürüş bitirme kuralı, log filtreleri, olay akışı.
 
-**Frontend smoke:** İki uygulamanın sayfaları ve tüm dosyaları, sıkıştırılmış yol verisi, nginx'in API anahtarını eklemesi. Tarayıcıda da sürücü haritası ve yol ağı ile operasyonun canlı bağlantısı, sistem durumu ve kayıtları konsol hatasız açılır.
+**Frontend smoke:** İki uygulamanın sayfaları ve tüm dosyaları, sıkıştırılmış yol verisi, nginx'in API anahtarını eklemesi, sürücü uygulamasının anahtarıyla logların okunamaması. Tarayıcıda da sürücü haritası ve yol ağı ile operasyonun canlı bağlantısı, sistem durumu ve kayıtları konsol hatasız açılır.
 
 **Frontend tarayıcı e2e** (Playwright, yüklü Chrome):
 - Sürücü ↔ servis ↔ operasyon veri alışverişi: konum, park yasak bölgeye giriş, çevrimdışı birikim, yeni alanın duyurusu.
 - Rota ve sürüklemenin yollarla ve yasak bölgelerle sınırlı olması.
 - Sürüşün sadece park alanında bitmesi.
-- Testler çalışan stack'e `ui-` önekli scooter'larla konum gönderir; `test-all.sh` bunları sonda temizler.
+- Testler çalışan stack'e `ui-` önekli scooter'larla konum gönderir ve "UI testi" adlı bir alan oluşturur; `test-all.sh` bunları sonda temizler. Yine de production'a karşı çalıştırılmamalı.
 
 Smoke testleri deploy sonrası kontrol için tasarlandı: her biri 1–2 saniye sürer, `BASE_URL` / `DRIVER_URL` / `OPS_URL` / `DB_*` ile herhangi bir ortama yöneltilebilir ve başarısızlıkta 1 koduyla çıkar. Her biri bilerek bozulmuş bir ortamda denenip hatayı yakaladığı doğrulandı: yanlış anahtar, durdurulmuş worker, geri eklenmiş HOT engelleyici index, durdurulmuş operasyon uygulaması.
 
@@ -320,7 +330,7 @@ Sürücü ──konum──▶ API ──kuyruk──▶ Worker ──giriş/ç�
 - **Alanlar:** Çokgen veya dikdörtgen çizilip kaydedilir. Servis yeni alanı Redis üzerinden duyurur (`areas-changed`); açık sürücü uygulamaları haritayı sayfa yenilemeden günceller.
 - Üst çubukta `/health`'ten beslenen sistem durumu: veritabanı, Redis ve kuyrukta bekleyen konumlar.
 
-Ortak kod (`clients/shared`): API istemcisi, harita, levhalar, bölge renkleri ve stiller. API anahtarı tarayıcıya hiç gönderilmez; üretimde nginx, geliştirmede Vite proxy'si ekler.
+Ortak kod (`clients/shared`): API istemcisi, harita, levhalar, bölge renkleri ve stiller. API anahtarı tarayıcı koduna gömülmez; üretimde nginx, geliştirmede Vite proxy'si ekler. Sürücü uygulaması sadece konum gönderebilen anahtarı kullanır (bkz. Güvenlik).
 
 **Demo filosu:** Operasyon ekranını doldurmak için `node loadtest/fleet.mjs 50`. Kadıköy'de rastgele dolaşan 50 scooter, her biri 5 saniyede bir konum gönderir.
 
@@ -347,126 +357,12 @@ api/src/
   geofence/     giriş/çıkış tespiti: GeofenceService (akış) + GeofenceRepository (SQL) + BullMQ processor
   logs/         GET /logs (giriş kayıtları), keyset sayfalama
   realtime/     RealtimeSubscriber (Redis) → RealtimeGateway (Socket.IO odaları), PositionBuffer, CORS adaptörü
-  security/     API anahtarı guard'ı ve Swagger dekoratörü, kullanıcı başına rate limit
+  queue/        BullMQ kuyruğu, iş biçimi, kullanıcı başına iş sırası (UserSequencer)
+  security/     API anahtarı guard'ı (tam / sadece konum yetkisi), Swagger dekoratörü, kullanıcı başına rate limit
   metrics/      Prometheus metrik tanımları ve /metrics
   health/       /health
   config/       doğrulanan ayarlar (ConfigError), CORS, logger, .env yükleme
   common/       http/ (istek kimliği, erişim logu, Retry-After), redis/ (bağlantı)
-  database/     TypeORM ayarları, migration, migrate scripti
-api/test/requirements.e2e-spec.ts`): Case metnindeki her madde ayrı bir testle doğrulanır.
-
-| Gereksinim | Doğrulama |
-|---|---|
-| `POST /locations`: User ID, Latitude, Longitude, Timestamp | Dört alanla `202`; herhangi biri eksikse `400` |
-| `POST /areas`: polygon alan | GeoJSON Polygon kaydedilir; polygon olmayan geometri `400` |
-| `GET /areas` | Oluşturulan alanlar geometrileriyle listelenir |
-| Alana girişte kayıt | `GET /logs` kaydı User ID, Area ID ve Entry Time içerir; Entry Time gönderilen timestamp'tir |
-| Yalnızca girişler | Dışarıdaki konum kayıt üretmez; 5 sn'de bir içeride kalan kullanıcı tek kayıt üretir |
-| Polygon doğruluğu | Çakışan alanlara ayrı kayıt açılır; polygon deliğindeki nokta giriş sayılmaz |
-| Trafik artışı | 100 eşzamanlı kullanıcının 5 sn aralıklı konumları doğru sayıda giriş üretir |
-| Veri büyümesi | Loglar `limit` ve `nextCursor` ile tekrar ve boşluk olmadan sayfalanır |
-
-**Smoke testi** (`api/scripts/smoke.mjs`): Çalışan bir ortama karşı yaklaşık bir saniyede uçtan uca kontrol yapar. Adımlar: sağlık kontrolü, anahtarsız isteğin reddi, alan oluşturma ve listeleme, dışarıdan içeri konum, `GET /logs`'ta giriş kaydı, çıkışta `exitTime`, eksik timestamp'e `400`, metrikler.
-- Tek bir sabit test alanı (`smoke-test-area`) kullanır; alan Güney Okyanusu'nda, gerçek kullanıcılar giremez.
-- Her koşuda benzersiz bir kullanıcı kimliği kullanır, bu yüzden tekrar tekrar çalıştırılabilir.
-- Bağımlılığı yoktur, Node 18+ yeterli. Deploy sonrası kontrol için uygundur.
-- Başarısızlıkta 1 koduyla çıkar. Yanlış anahtarla ve worker'lar durdurulmuşken çalıştırılarak hataları yakaladığı doğrulandı.
-
-**Temiz kurulum doğrulaması:** Repoya girecek dosyalar ayrı bir klasöre kopyalandı ve farklı portlarda, boş bir veritabanıyla sıfırdan ayağa kaldırıldı (`docker compose -p ... up`). Migration, seed, smoke testi, `npm ci` sonrası lint, birim ve e2e testleri ve istemci derlemesi hepsi geçti. Host portları `POSTGRES_PORT`, `REDIS_PORT`, `API_PORT`, `OPS_PORT` ve `DRIVER_PORT` ile değiştirilebilir.
-
-**İstemci testleri** (`clients` klasöründe):
-- `npm run test:unit` (Vitest, 26 test): Saf mantık testleri.
-  - Yol ağı: yola yapıştırma, blok etrafından dolaşan rota, yasak bölgeden kaçınma, gerçek Kadıköy verisi.
-  - Sürüş bitirme kuralı.
-  - Log filtreleri ve kalış süresi.
-  - Olay akışının birleştirilmesi.
-- `npm run test:ui`: Tarayıcı testleri.
-  - `e2e/roads.test.mjs`: Rota ve sürüklemenin yollarla ve sürüş yasak bölgelerle sınırlı olduğunu doğrular.
-  - `e2e/ride.test.mjs`: Sürüşün sadece park alanında bitirilebildiğini doğrular.
-  - Testler çalışan stack'e `ui-` önekli scooter'larla konum gönderir. Bu scooter'lar operasyon ekranında en fazla 60 saniye görünür.
-
-**İstemciler arası tarayıcı testi** (`clients/e2e/exchange.test.mjs`, `npm run test:ui` ile birlikte çalışır): Sürücü ve operasyon uygulamalarını gerçek bir tarayıcıda (yüklü Google Chrome, Playwright) aynı anda açar ve dört senaryoyu doğrular:
-- Sürüş başlayınca konum gönderilir.
-- Sürücü yasak bölgeye girince sürücüde levha, operasyonda canlı olay ve giriş kaydı oluşur.
-- Çevrimdışı biriken konumlar bağlanınca toplu gider.
-- Operasyonun çizdiği yeni alan sürücüye sayfa yenilenmeden ulaşır.
-
-Son senaryo gerçek bir alan oluşturduğu için (Moda açıklarında, denizde) yerel veya test ortamında çalıştırılmalı.
-
-Diğer e2e dosyalarının kapsadığı konular:
-- Giriş, çıkış (`exitTime`) ve içeride kalma
-- Çıkıp tekrar girişte yeni kayıt
-- Sırası karışık gelen konum
-- Eksik veya ileri tarihli `timestamp`
-- 50 paralel istekte tek giriş
-- Farklı kullanıcıların birbirinden bağımsızlığı
-- Poligon doğrulama
-- Cursor sayfalamanın tekrar ve boşluk bırakmaması
-- Filtreler
-- Toplu istek: ters sırada gönderilen noktaların doğru işlenmesi, hepsi-ya-hiçbiri doğrulama
-- API anahtarı (HTTP ve WebSocket), kullanıcı başına rate limit ve `Retry-After`
-- Kuyruk dolunca `503`
-- İstek kimliği ve Prometheus metrikleri
-
-## Demo istemcileri (case kapsamı dışında)
-
-Case bir arayüz istemiyor. Bu iki uygulama servisi uçtan uca görmek, sunumda göstermek ve servisin istemci tarafından nasıl kullanılacağını örneklemek için eklendi. İkisi birbirine doğrudan bağlanmaz; tüm alışveriş servis üzerinden olur.
-
-```
-Sürücü ──konum──▶ API ──kuyruk──▶ Worker ──giriş/çıkış──▶ Redis ──▶ API ──Socket.IO──▶ Operasyon
-   ▲                                                                      │
-   └──────────────── bölge bildirimi (levha), yeni alan duyurusu ◀────────┘
-```
-
-**Sürücü uygulaması** (`clients/driver`, :8081): Tek bir scooter'ın telefonu gibi davranır.
-- "Sürüşü başlat" ile o anki konum **5 saniyede bir** ölçülür ve gönderilir. Scooter haritada sürüklenir ya da çizilen bir rota oynatılır.
-- **Hareket sadece yollarda.** Rota duraklarına tıklanınca, tıklanan yer en yakın yola yapıştırılır. 60 m içinde yol yoksa (arsa ortası, deniz) tıklama yok sayılır ve imleç "izin yok"a döner. Fare gezerken yoldaki hedef nokta önizlenir. Bir durağa (ya da aynı arsaya) tekrar tıklamak o durağı siler; üzerine gelinen durak kırmızıya döner ve rota kalan duraklara göre yeniden hesaplanır. Duraklar arasındaki rota yol ağı üzerinden en kısa yol olarak hesaplanır (A*); scooter köşelerden döner, binaların içinden geçmez. Sürüklenen scooter da yol üzerinde kayar.
-- **Bölge kuralları:**
-  - **Sürüş yasak bölgeye girilemez.** Rota bu bölgelerin içinden geçmez, gerekirse etrafından dolaşır. Hedef bölgenin içindeyse durak bölgenin sınırına konur; yolun bölgeye girdiği noktalardan hem yakın hem tıklanan yere yakın olan seçilir. Bölge içine gelen önizleme kırmızı görünür. Sürüklenen scooter bölgeye girmeden önceki son yol noktasında kalır.
-  - **Sürüş sadece park alanlarında bitirilebilir.** Başka yerde "Sürüşü bitir"e basılınca sürüş devam eder. Uyarıda sebep ve en yakın park alanıyla yaklaşık uzaklığı gösterilir. Park yasak bölge için ayrı bir mesaj var.
-  - Bu kurallar scooter'ın (sürücü uygulamasının) davranışıdır. Servis, gerçek GPS'ten gelen sürüş yasak bölge girişlerini kaydetmeye devam eder; bu girişlerin loglanmasının amacı da budur.
-- Yol ağı OpenStreetMap'ten bir kez indirilip uygulamaya konmuştur (`clients/driver/public/roads-kadikoy.json`, yaklaşık 28 bin düğüm; gzip ile ~280 KB). Uygulama çalışırken dış bir servise bağımlı değildir. Veriyi yenilemek için: `node clients/driver/scripts/fetch-roads.mjs`. Taşıt yollarının yanında bisiklet yolu, yaya caddesi ve park yolları da dahildir, merdivenler hariçtir. Scooter için tek yön kısıtı uygulanmaz. Veri © OpenStreetMap katkıcıları, ODbL lisansı.
-- Gönderimler bir kuyruktan geçer. Tek nokta `POST /locations`, birikmiş noktalar en fazla 100'lük gruplar halinde `POST /locations/batch` ile gider.
-- "Bağlantıyı kes" ile çevrimdışı olunur; noktalar kaybolmaz, bağlanınca toplu gönderilir.
-- `429` veya `503` gelirse `Retry-After` süresi kadar beklenir. `400` gelen grup atılır, çünkü tekrar gönderilse de düzelmez.
-- Her istek bir `x-request-id` taşır. "Cihaz günlüğü" neyin gönderildiğini, sunucunun ne dediğini ve istek kimliğini gösterir.
-- Bölgeye giriş ve çıkışta sunucudan gelen bildirim, trafik levhası olarak belirir. Örneğin sürüş yasak bölgede kırmızı "girilmez" levhası.
-
-**Operasyon uygulaması** (`clients/ops`, :8080):
-- **Canlı izleme:** Son 60 saniyede konum göndermiş scooter'lar aktif sayılır. 15 saniyedir sessiz olan soluk görünür; sürüş bitmiş, sekme kapanmış ya da bağlantı kopmuş olabilir. 60 saniyede listeden düşer. Scooter'lar bulundukları bölgeye göre renklenir. Yanında anlık sayaçlar ve giriş/çıkış akışı var. Konumlar sunucuda 200 ms'lik gruplar halinde gönderilir; tarayıcıda React state'ine girmeden doğrudan Leaflet katmanında güncellenir.
-- **Giriş kayıtları:** `GET /logs` üzerinde kullanıcı, alan, durum (içeride veya çıkmış) ve giriş zamanı aralığı filtreleri. Cursor ile "daha fazla göster" ve kalış süresi. Yeni girişler geldikçe "N yeni giriş" bildirimi çıkar.
-- **Alanlar:** Çokgen veya dikdörtgen çizilip kaydedilir. Servis yeni alanı Redis üzerinden duyurur (`areas-changed`); açık sürücü uygulamaları haritayı sayfa yenilemeden günceller.
-- Üst çubukta `/health`'ten beslenen sistem durumu: veritabanı, Redis ve kuyrukta bekleyen konumlar.
-
-Ortak kod (`clients/shared`): API istemcisi, harita, levhalar, bölge renkleri ve stiller. API anahtarı tarayıcıya hiç gönderilmez; üretimde nginx, geliştirmede Vite proxy'si ekler.
-
-**Demo filosu:** Operasyon ekranını doldurmak için `node loadtest/fleet.mjs 50`. Kadıköy'de rastgele dolaşan 50 scooter, her biri 5 saniyede bir konum gönderir.
-
-## Yerel geliştirme (Docker'sız API)
-
-```bash
-docker compose up -d postgres redis
-cd api && cp .env.example .env
-npm run migration:run
-npm run start:dev                 # API :3000
-npm run start:worker:dev          # ayrı terminalde worker
-cd ../clients && npm ci
-npm run dev:ops                   # operasyon :5173 (API'ye proxy'ler)
-npm run dev:driver                # sürücü :5174
-```
-
-## Proje yapısı
-
-```
-api/src/
-  areas/        POST/GET /areas, GeoJSON doğrulama
-  locations/    POST /locations(/batch) → kuyruk, backpressure, GET /locations/latest
-  geofence/     giriş/çıkış tespiti (servis + BullMQ processor)
-  logs/         GET /logs (giriş kayıtları), keyset sayfalama
-  realtime/     Redis pub/sub → Socket.IO
-  security/     API anahtarı guard'ı, kullanıcı başına rate limit
-  metrics/      Prometheus metrik tanımları ve /metrics
-  common/       istek kimliği + erişim logu middleware'i, Retry-After
   database/     TypeORM ayarları, migration, migrate scripti
 api/test/       e2e testleri
 clients/                       iki istemci (npm workspaces); özelliğe göre klasörlenmiş
@@ -500,7 +396,7 @@ loadtest/       k6 yük testi, demo filosu (fleet.mjs)
 
 Bunlar production için sıradaki adımlar olur:
 
-- **Son kullanıcı kimliği.** API anahtarı istemci uygulamayı doğrular; `userId` hâlâ istek gövdesinden geliyor. Mobil cihaz servisi doğrudan çağıracaksa `userId`, gövde yerine imzalı bir token'dan (JWT) alınmalı.
+- **Son kullanıcı kimliği.** API anahtarı istemci uygulamayı doğrular; `userId` hâlâ istek gövdesinden geliyor. Sürücü anahtarını bilen biri başka bir `userId` adına konum gönderebilir ya da o kullanıcının canlı yayın odasına abone olabilir. Mobil cihaz servisi doğrudan çağıracaksa `userId`, gövde yerine imzalı bir token'dan (JWT) alınmalı.
 - **Veri saklama ve partitioning.** `area_logs` sınırsız büyür. İlk adım: belirli günden eski kapanmış kayıtları küçük partiler halinde silen zamanlanmış bir iş. Asıl çözüm aylık partitioning ve eski ayları `DROP PARTITION` ile silmek; ancak "aynı alanda tek açık giriş" garantisi partition'lı tabloda tek bir unique index'le sağlanamaz. Önerilen tasarım: açık girişleri küçük ayrı bir partition'da tutmak (unique index orada), kapanan kayıt çıkışta zaman partition'ına taşınır.
 - **Alan güncelleme ve silme.** Bir alanın geometrisi değişince içinde bulunan kullanıcıların durumunun yeniden hesaplanması gerekir.
 - **Canlı yayın güvenilirliği.** Yayın şu an "en iyi çaba" ile yapılıyor; log zaten DB'de olduğu için veri kaybı yok. Yayının garanti olması gerekirse outbox deseni kullanılabilir.

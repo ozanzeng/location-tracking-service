@@ -2,6 +2,7 @@ import { getQueueToken } from '@nestjs/bullmq';
 import type { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import type { Queue } from 'bullmq';
+import { Redis } from 'ioredis';
 import { DataSource } from 'typeorm';
 import { AppModule } from '../src/app.module.js';
 import {
@@ -41,6 +42,15 @@ export async function createTestApp(
 export async function resetState(app: INestApplication): Promise<void> {
   const queue = app.get<Queue>(getQueueToken(LOCATION_QUEUE));
   await queue.drain(true);
+  // Boşaltılan işlerin sıra no'ları hiç tamamlanmaz; kalırsa sonraki testin işleri bekler.
+  const config = app.get<AppConfig>(APP_CONFIG);
+  const redis = new Redis(config.redisUrl);
+  try {
+    const seqKeys = await redis.keys(`${config.queue.prefix}:seq:*`);
+    if (seqKeys.length) await redis.del(...seqKeys);
+  } finally {
+    await redis.quit();
+  }
   await app
     .get(DataSource)
     .query(

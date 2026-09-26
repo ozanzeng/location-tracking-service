@@ -66,6 +66,14 @@ for (const [name, base] of [
   });
 }
 
+await step('sürücü anahtarı sadece konum gönderebilir', async () => {
+  // Sürücü uygulaması herkese açık; nginx'inin eklediği anahtarla loglar okunamamalı.
+  const driverLogs = await get(`${DRIVER_URL}/api/logs?limit=1`);
+  expect(driverLogs.status === 403, `sürücü /api/logs → ${driverLogs.status} (403 bekleniyordu)`);
+  const opsLogs = await get(`${OPS_URL}/api/logs?limit=1`);
+  expect(opsLogs.ok, `operasyon /api/logs → ${opsLogs.status}`);
+});
+
 let browser;
 try {
   browser = await chromium.launch({ channel: process.env.PW_CHANNEL ?? 'chrome', headless: true });
@@ -87,9 +95,13 @@ if (browser) {
     const { page, errors } = await openPage();
     await page.goto(DRIVER_URL);
     await page.waitForSelector('.leaflet-marker-icon.rider', { timeout: 8000 });
-    await page.waitForFunction(() => document.querySelector('.panel')?.textContent.includes('yol üzerinde kalır'), null, {
-      timeout: 8000,
-    });
+    await page.waitForFunction(
+      () => document.querySelector('.panel')?.textContent.includes('yol üzerinde kalır'),
+      null,
+      {
+        timeout: 8000,
+      },
+    );
     await page.getByRole('button', { name: 'Yakınlaştır' }).waitFor({ timeout: 3000 });
     await page.getByRole('button', { name: 'Sürüşü başlat' }).waitFor({ timeout: 3000 });
     expect(errors.length === 0, `konsol hatası: ${errors[0]}`);

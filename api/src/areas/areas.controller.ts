@@ -1,6 +1,7 @@
 import { Body, Controller, Get, Post, Query } from '@nestjs/common';
 import { ApiCreatedResponse, ApiOkResponse, ApiTags } from '@nestjs/swagger';
 import { ApiKeyAuth } from '../security/api-key-auth.decorator.js';
+import { IngestAllowed } from '../security/ingest-allowed.decorator.js';
 import { AreasService } from './areas.service.js';
 import { CreateAreaDto } from './dto/create-area.dto.js';
 import { ListAreasQueryDto } from './dto/list-areas-query.dto.js';
@@ -19,6 +20,7 @@ export class AreasController {
   }
 
   @Get()
+  @IngestAllowed()
   @ApiOkResponse({ type: [AreaResponseDto] })
   async findAll(@Query() query: ListAreasQueryDto): Promise<AreaResponseDto[]> {
     const areas = await this.areasService.findAll(query.type);

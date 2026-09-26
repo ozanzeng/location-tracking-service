@@ -1,7 +1,12 @@
 name: geofence
 
 x-api-env: &api-env
-  NODE_ENV: production
+  # Yerel demo: bilinen demo anahtarlarıyla çalıştığı için production değil. Production'da
+  # (NODE_ENV=production) API, en az 16 karakterlik anahtarlar verilmeden açılmaz.
+  NODE_ENV: ${NODE_ENV:-development}
+  # Production'daki davranışlar demo için de açıkça seçildi: JSON log, CORS kapalı.
+  LOG_FORMAT: json
+  CORS_ORIGINS: ""
   DB_HOST: postgres
   DB_PORT: 5432
   DB_USER: geofence
@@ -10,8 +15,10 @@ x-api-env: &api-env
   DB_POOL_SIZE: 20
   REDIS_URL: redis://redis:6379
   WORKER_CONCURRENCY: 32
-  # Yerel demo anahtarı; gerçek ortamda secret olarak verilmeli.
+  # Yerel demo anahtarları; gerçek ortamda secret olarak verilmeli.
+  # Tam yetki (operasyon, betikler) ve sadece konum gönderme (sürücü uygulaması).
   API_KEYS: ${API_KEY:-dev-api-key}
+  INGEST_API_KEYS: ${DRIVER_API_KEY:-dev-driver-key}
   RATE_LIMIT_USER_PER_MIN: ${RATE_LIMIT_USER_PER_MIN:-60}
 
 services:
@@ -96,7 +103,9 @@ services:
       args:
         APP: ops
     environment:
-      # Anahtar tarayıcıya gönderilmez; nginx API isteklerine ekler.
+      # nginx API isteklerine ekler: anahtar tarayıcı kodunda görünmez, ama bu adrese
+      # erişebilen herkes onun yetkisini kullanır. Operasyon uygulaması iç ağda/VPN ya da
+      # SSO arkasında yayınlanmalı.
       API_KEY: ${API_KEY:-dev-api-key}
     ports:
       - "${OPS_PORT:-8080}:80"
@@ -110,7 +119,8 @@ services:
       args:
         APP: driver
     environment:
-      API_KEY: ${API_KEY:-dev-api-key}
+      # Herkese açık uygulama: sadece konum gönderip alanları okuyabilen anahtar.
+      API_KEY: ${DRIVER_API_KEY:-dev-driver-key}
     ports:
       - "${DRIVER_PORT:-8081}:80"
     depends_on:
