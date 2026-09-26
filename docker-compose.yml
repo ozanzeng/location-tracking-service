@@ -1,0 +1,107 @@
+name: geofence
+
+x-api-env: &api-env
+  NODE_ENV: production
+  DB_HOST: postgres
+  DB_PORT: 5432
+  DB_USER: geofence
+  DB_PASSWORD: geofence
+  DB_NAME: geofence
+  DB_POOL_SIZE: 20
+  REDIS_URL: redis://redis:6379
+  WORKER_CONCURRENCY: 32
+
+services:
+  postgres:
+    # Resmi postgis/postgis imajı sadece amd64; bu imaj arm64'ü de destekliyor.
+    image: imresamu/postgis:17-3.5
+    environment:
+      POSTGRES_USER: geofence
+      POSTGRES_PASSWORD: geofence
+      POSTGRES_DB: geofence
+    command:
+      - postgres
+      - -c
+      - max_connections=300
+      - -c
+      - shared_buffers=256MB
+      - -c
+      - synchronous_commit=off
+    ports:
+      - "5444:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/99-test-db.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U geofence -d geofence"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  redis:
+    image: redis:8-alpine
+    command: ["redis-server", "--appendonly", "no", "--maxmemory-policy", "noeviction"]
+    ports:
+      - "6390:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  migrate:
+    build: ./api
+    command: ["node", "dist/database/migrate.js"]
+    environment: *api-env
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    build: ./api
+    command: ["node", "dist/main.js"]
+    environment:
+      <<: *api-env
+      PORT: 3000
+    ports:
+      - "3000:3000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+  worker:
+    build: ./api
+    command: ["node", "dist/worker.js"]
+    environment: *api-env
+    deploy:
+      replicas: 2
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+  web:
+    build: ./web
+    ports:
+      - "8080:80"
+    depends_on:
+      - api
+
+  k6:
+    image: grafana/k6:latest
+    profiles: ["loadtest"]
+    environment:
+      BASE_URL: http://api:3000
+    volumes:
+      - ./loadtest:/scripts:ro
+      - ./loadtest/results:/results
+    entrypoint: ["k6"]
+    command: ["run", "/scripts/locations.k6.js"]
+    depends_on:
+      - api
+
+volumes:
+  pgdata:
