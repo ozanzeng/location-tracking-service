@@ -35,12 +35,16 @@ export class ListLogsQueryDto {
   @IsBoolean()
   active?: boolean;
 
-  @ApiPropertyOptional({ description: 'Bu giriş zamanından itibaren (ISO 8601, dahil)' })
+  @ApiPropertyOptional({
+    description: 'Bu giriş zamanından itibaren (ISO 8601, dahil)',
+  })
   @IsOptional()
   @IsISO8601()
   from?: string;
 
-  @ApiPropertyOptional({ description: 'Bu giriş zamanına kadar (ISO 8601, hariç)' })
+  @ApiPropertyOptional({
+    description: 'Bu giriş zamanına kadar (ISO 8601, hariç)',
+  })
   @IsOptional()
   @IsISO8601()
   to?: string;

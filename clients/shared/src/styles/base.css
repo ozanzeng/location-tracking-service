@@ -1,0 +1,58 @@
+:root {
+  --asphalt: #2b2f36;
+  --asphalt-soft: #5c626d;
+  --road: #f7f8f6;
+  --line: #dfe2e0;
+  --paper: #ffffff;
+  --signal: #d7263d;
+  --caution: #f2a900;
+  --sign-blue: #1f5fad;
+  --focus: #1f5fad;
+
+  --step--1: 0.8125rem;
+  --step-0: 0.9375rem;
+  --step-1: 1.125rem;
+  --step-2: 1.5rem;
+  --step-3: 2rem;
+
+  color-scheme: light;
+  font-family: Overpass, 'Helvetica Neue', Arial, sans-serif;
+  font-size: 100%;
+  line-height: 1.45;
+  color: var(--asphalt);
+  background: var(--road);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--road);
+}
+
+button,
+input,
+select {
+  font: inherit;
+  color: inherit;
+}
+
+:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.num {
+  font-variant-numeric: tabular-nums;
+}

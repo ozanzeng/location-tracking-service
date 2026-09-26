@@ -1,10 +1,12 @@
 import { Controller, Get, Query } from '@nestjs/common';
 import { ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { ApiKeyAuth } from '../security/api-key-auth.decorator.js';
 import { ListLogsQueryDto } from './dto/list-logs-query.dto.js';
 import { LogPageDto } from './dto/log-response.dto.js';
 import { LogsService } from './logs.service.js';
 
 @ApiTags('logs')
+@ApiKeyAuth()
 @Controller('logs')
 export class LogsController {
   constructor(private readonly logsService: LogsService) {}

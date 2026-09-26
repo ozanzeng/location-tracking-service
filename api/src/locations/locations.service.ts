@@ -1,85 +1,80 @@
 import { InjectQueue } from '@nestjs/bullmq';
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { InjectDataSource } from '@nestjs/typeorm';
 import type { Queue } from 'bullmq';
-import { DataSource } from 'typeorm';
+import { locationsAccepted } from '../metrics/metrics.js';
 import {
   LOCATION_JOB,
   LOCATION_QUEUE,
   type LocationJobData,
 } from '../queue/location-job.js';
-import type { AreaRef } from '../geofence/geofence.types.js';
+import { UserRateLimiter } from '../security/user-rate-limiter.js';
 import type { CreateLocationDto } from './dto/create-location.dto.js';
+import { buildLocationJobs, FutureTimestampError } from './location-jobs.js';
+import { QueueBackpressure } from './queue-backpressure.js';
 
-/** Cihaz saatinin sunucudan ileride olmasına izin verilen pay. */
-const MAX_CLOCK_SKEW_MS = 60_000;
-
-export interface LatestPosition {
-  userId: string;
-  lat: number;
-  lng: number;
-  recordedAt: string;
-  /** Kullanıcının şu an içinde bulunduğu alanlar (açık girişler). */
-  areas: AreaRef[];
-}
-
+/**
+ * Yazma tarafı: konumları doğrular, kapasite ve kullanıcı sınırını kontrol eder, kuyruğa atar.
+ * Sıra önemli: önce ucuz kontroller (doğrulama, bellekteki kuyruk derinliği), sonra
+ * Redis'e giden rate limit; reddedilen istek sayaç harcamaz.
+ */
 @Injectable()
 export class LocationsService {
   constructor(
     @InjectQueue(LOCATION_QUEUE)
     private readonly queue: Queue<LocationJobData>,
-    @InjectDataSource() private readonly dataSource: DataSource,
+    private readonly rateLimiter: UserRateLimiter,
+    private readonly backpressure: QueueBackpressure,
   ) {}
 
   async enqueue(
     dto: CreateLocationDto,
+    requestId?: string,
     now = new Date(),
   ): Promise<{ jobId: string; recordedAt: string }> {
-    const recordedAt = new Date(dto.timestamp);
-    if (recordedAt.getTime() > now.getTime() + MAX_CLOCK_SKEW_MS) {
-      // İleri tarihli bir konum, sonraki gerçek konumların "eski" sayılıp atlanmasına yol açar.
-      throw new BadRequestException('timestamp gelecekte olamaz');
-    }
+    const [job] = this.build([dto], requestId, now);
+    this.backpressure.assertCapacity(1);
+    await this.rateLimiter.consume(new Map([[dto.userId, 1]]));
 
-    const job = await this.queue.add(LOCATION_JOB, {
-      userId: dto.userId,
-      lat: dto.lat,
-      lng: dto.lng,
-      recordedAt: recordedAt.toISOString(),
-    });
-    return { jobId: job.id!, recordedAt: recordedAt.toISOString() };
+    const added = await this.queue.add(LOCATION_JOB, job);
+    locationsAccepted.inc();
+    return { jobId: added.id!, recordedAt: job.points[0].recordedAt };
   }
 
-  /** Canlı izleme ekranının ilk yüklemesi için son bilinen konumlar. */
-  async latest(sinceMinutes: number, limit: number): Promise<LatestPosition[]> {
-    const rows: Array<{
-      user_id: string;
-      lat: number;
-      lng: number;
-      recorded_at: Date;
-      areas: AreaRef[];
-    }> = await this.dataSource.query(
-      `SELECT l.user_id, l.lat, l.lng, l.recorded_at,
-              COALESCE(
-                json_agg(json_build_object('id', a.id, 'name', a.name, 'type', a.type))
-                  FILTER (WHERE a.id IS NOT NULL),
-                '[]'::json
-              ) AS areas
-         FROM user_last_location l
-         LEFT JOIN area_logs v ON v.user_id = l.user_id AND v.exit_time IS NULL
-         LEFT JOIN areas a ON a.id = v.area_id
-        WHERE l.recorded_at > now() - make_interval(mins => $1)
-        GROUP BY l.user_id
-        ORDER BY l.recorded_at DESC
-        LIMIT $2`,
-      [sinceMinutes, limit],
+  /** Toplu ekleme: kullanıcı başına tek iş, hepsi tek Redis çağrısıyla kuyruğa girer. */
+  async enqueueBatch(
+    dtos: CreateLocationDto[],
+    requestId?: string,
+    now = new Date(),
+  ): Promise<{ accepted: number; jobIds: string[] }> {
+    const jobs = this.build(dtos, requestId, now);
+    this.backpressure.assertCapacity(jobs.length);
+    await this.rateLimiter.consume(
+      new Map(jobs.map((job) => [job.userId, job.points.length])),
     );
-    return rows.map((r) => ({
-      userId: r.user_id,
-      lat: r.lat,
-      lng: r.lng,
-      recordedAt: r.recorded_at.toISOString(),
-      areas: r.areas,
-    }));
+
+    const added = await this.queue.addBulk(
+      jobs.map((data) => ({ name: LOCATION_JOB, data })),
+    );
+    locationsAccepted.inc(dtos.length);
+    return { accepted: dtos.length, jobIds: added.map((j) => j.id!) };
+  }
+
+  private build(
+    dtos: CreateLocationDto[],
+    requestId: string | undefined,
+    now: Date,
+  ): LocationJobData[] {
+    try {
+      return buildLocationJobs(dtos, requestId, now);
+    } catch (err) {
+      if (err instanceof FutureTimestampError) {
+        throw new BadRequestException(
+          dtos.length > 1
+            ? `locations.${err.index}.${err.message}`
+            : err.message,
+        );
+      }
+      throw err;
+    }
   }
 }

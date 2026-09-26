@@ -1,11 +1,13 @@
 import { Body, Controller, Get, Post, Query } from '@nestjs/common';
 import { ApiCreatedResponse, ApiOkResponse, ApiTags } from '@nestjs/swagger';
+import { ApiKeyAuth } from '../security/api-key-auth.decorator.js';
 import { AreasService } from './areas.service.js';
 import { CreateAreaDto } from './dto/create-area.dto.js';
 import { ListAreasQueryDto } from './dto/list-areas-query.dto.js';
 import { AreaResponseDto } from './dto/area-response.dto.js';
 
 @ApiTags('areas')
+@ApiKeyAuth()
 @Controller('areas')
 export class AreasController {
   constructor(private readonly areasService: AreasService) {}

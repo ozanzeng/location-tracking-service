@@ -1,0 +1,4 @@
+/* İki uygulamanın ortak stilleri; uygulamaya özel stiller kendi klasörlerinde. */
+@import './base.css';
+@import './layout.css';
+@import './map.css';

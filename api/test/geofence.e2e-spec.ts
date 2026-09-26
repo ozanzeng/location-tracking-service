@@ -91,7 +91,9 @@ describe('Konum → alan giriş/çıkış (e2e)', () => {
     await waitForQueueDrain(app);
 
     const logs = await logsFor('u1');
-    expect(logs.map((l) => [l.entryTime, l.exitTime])).toEqual([[at(10), null]]);
+    expect(logs.map((l) => [l.entryTime, l.exitTime])).toEqual([
+      [at(10), null],
+    ]);
   });
 
   it('aynı kullanıcı için 50 eşzamanlı istek tam olarak 1 giriş üretir', async () => {
@@ -133,6 +135,46 @@ describe('Konum → alan giriş/çıkış (e2e)', () => {
     expect(
       res.body.data.map((l: { userId: string }) => l.userId).sort(),
     ).toEqual(['a', 'b']);
+  });
+
+  it('toplu istekte sırası karışık gönderilen noktaları zamana göre işler', async () => {
+    // İçeride → dışarıda → içeride; ters sırada gönderiliyor.
+    const res = await request(app.getHttpServer())
+      .post('/locations/batch')
+      .send({
+        locations: [
+          { userId: 'u4', ...INSIDE, timestamp: at(2) },
+          { userId: 'u4', ...OUTSIDE, timestamp: at(1) },
+          { userId: 'u4', ...INSIDE, timestamp: at(0) },
+          { userId: 'u5', ...INSIDE, timestamp: at(0) },
+        ],
+      })
+      .expect(202);
+    expect(res.body.accepted).toBe(4);
+    expect(res.body.jobIds).toHaveLength(2);
+    await waitForQueueDrain(app);
+
+    expect((await logsFor('u4')).map((l) => [l.entryTime, l.exitTime])).toEqual(
+      [
+        [at(2), null],
+        [at(0), at(1)],
+      ],
+    );
+    expect(await logsFor('u5')).toHaveLength(1);
+  });
+
+  it('toplu istekte bir konum geçersizse hiçbirini almaz', async () => {
+    await request(app.getHttpServer())
+      .post('/locations/batch')
+      .send({
+        locations: [
+          { userId: 'u6', ...INSIDE, timestamp: at(0) },
+          { userId: 'u6', lat: 200, lng: 0, timestamp: at(1) },
+        ],
+      })
+      .expect(400);
+    await waitForQueueDrain(app);
+    expect(await logsFor('u6')).toEqual([]);
   });
 
   it('timestamp olmayan konumu 400 ile reddeder', async () => {

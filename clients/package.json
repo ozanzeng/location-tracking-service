@@ -1,0 +1,43 @@
+{
+  "name": "geofence-clients",
+  "private": true,
+  "type": "module",
+  "description": "Location Tracking Service istemcileri: sürücü ve operasyon uygulamaları",
+  "workspaces": [
+    "driver",
+    "ops"
+  ],
+  "scripts": {
+    "dev:driver": "npm run dev -w driver",
+    "dev:ops": "npm run dev -w ops",
+    "build": "npm run build -w driver && npm run build -w ops",
+    "typecheck": "npm run typecheck -w driver && npm run typecheck -w ops",
+    "test:ui": "node --test --test-concurrency=1 e2e/*.test.mjs",
+    "test:unit": "vitest run",
+    "format": "prettier --write \"shared/src/**/*.{ts,tsx,css}\" \"driver/src/**/*.{ts,tsx,css}\" \"ops/src/**/*.{ts,tsx,css}\" \"e2e/**/*.mjs\" \"scripts/**/*.mjs\"",
+    "smoke": "node scripts/smoke.mjs"
+  },
+  "dependencies": {
+    "@geoman-io/leaflet-geoman-free": "^2.20.2",
+    "leaflet": "^1.9.4",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "react-leaflet": "^5.0.0",
+    "socket.io-client": "^4.8.3"
+  },
+  "devDependencies": {
+    "@testing-library/react": "^16.3.3",
+    "@types/geojson": "^7946.0.16",
+    "@types/leaflet": "^1.9.22",
+    "@types/node": "^24.13.6",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.1",
+    "jsdom": "^30.1.1",
+    "playwright-core": "^1.63.0",
+    "prettier": "^3.9.9",
+    "typescript": "^6.0.3",
+    "vite": "^8.3.1",
+    "vitest": "^4.1.11"
+  }
+}

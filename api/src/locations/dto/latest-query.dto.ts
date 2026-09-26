@@ -3,7 +3,10 @@ import { Type } from 'class-transformer';
 import { IsInt, IsOptional, Max, Min } from 'class-validator';
 
 export class LatestLocationsQueryDto {
-  @ApiPropertyOptional({ default: 30, description: 'Son kaç dakikadaki konumlar' })
+  @ApiPropertyOptional({
+    default: 30,
+    description: 'Son kaç dakikadaki konumlar',
+  })
   @IsOptional()
   @Type(() => Number)
   @IsInt()

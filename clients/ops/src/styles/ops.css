@@ -1,0 +1,270 @@
+/* Operasyon uygulamasına özel */
+
+.status--down {
+  color: #ffb3bd;
+  font-weight: 700;
+}
+
+/* Harita olmayan sayfalar (giriş kayıtları) */
+
+.page {
+  height: 100%;
+  overflow-y: auto;
+  padding: 1.5rem 1.25rem 3rem;
+}
+
+.page > * {
+  max-width: 72rem;
+  margin-inline: auto;
+}
+
+.page__head h1 {
+  margin: 0 0 0.4rem;
+  font-size: var(--step-3);
+  font-weight: 800;
+  line-height: 1.05;
+  letter-spacing: -0.02em;
+}
+
+.page__head p {
+  margin: 0 auto 1.25rem 0;
+  color: var(--asphalt-soft);
+}
+
+.filters {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
+  gap: 0.75rem;
+  align-items: end;
+  margin-bottom: 1rem;
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--paper);
+}
+
+.filters label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: var(--step--1);
+  font-weight: 700;
+}
+
+.filters input,
+.filters select {
+  min-height: 2.5rem;
+  padding: 0.4rem 0.6rem;
+  border: 1.5px solid #c3c8c5;
+  border-radius: 6px;
+  background: #fff;
+  font-weight: 400;
+}
+
+.filters__actions {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.new-entries {
+  display: block;
+  width: 100%;
+  margin-bottom: 0.75rem;
+  padding: 0.6rem;
+  border: 1.5px solid var(--sign-blue);
+  border-radius: 8px;
+  background: #eaf1fa;
+  color: var(--sign-blue);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--paper);
+}
+
+.logs {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--step--1);
+}
+
+.logs th {
+  position: sticky;
+  top: 0;
+  padding: 0.65rem 0.9rem;
+  border-bottom: 1.5px solid var(--asphalt);
+  background: var(--paper);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.logs td {
+  padding: 0.55rem 0.9rem;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+
+.logs tbody tr:hover {
+  background: var(--road);
+}
+
+.logs__area {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.logs__empty {
+  padding: 1.5rem 1rem;
+}
+
+.link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--sign-blue);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.link:hover {
+  text-decoration: underline;
+}
+
+.badge {
+  display: inline-block;
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  background: #e5f3ea;
+  color: #1f7a45;
+  font-weight: 700;
+}
+
+.load-more {
+  display: block;
+  margin: 1rem auto 0;
+}
+
+@media (max-width: 760px) {
+  .topbar__status {
+    display: none;
+  }
+}
+
+/* Canlı izleme: sayaçlar ve olay akışı */
+
+.stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.75rem;
+}
+
+.stat {
+  display: flex;
+  flex-direction: column;
+}
+
+.stat b {
+  font-size: var(--step-3);
+  font-weight: 800;
+  line-height: 1;
+}
+
+.stat span {
+  font-size: var(--step--1);
+  color: var(--asphalt-soft);
+}
+
+.stat--alert b {
+  color: var(--signal);
+}
+
+.feed ol {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.feed__item {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.45rem 0;
+  border-bottom: 1px solid var(--line);
+  font-size: var(--step--1);
+}
+
+.feed__item button {
+  padding: 0;
+  border: 0;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.feed__item button:hover strong {
+  text-decoration: underline;
+}
+
+.feed__item--EXIT {
+  color: var(--asphalt-soft);
+}
+
+.feed__item time {
+  font-variant-numeric: tabular-nums;
+  color: var(--asphalt-soft);
+}
+
+/* Alan formu */
+
+.types {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin: 0.25rem 0 0.5rem;
+  padding: 0;
+  border: 0;
+}
+
+.types legend {
+  margin-bottom: 0.4rem;
+  padding: 0;
+  font-weight: 700;
+}
+
+.type {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.4rem 0.6rem;
+  border: 1.5px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.type input {
+  position: absolute;
+  opacity: 0;
+}
+
+.type--on {
+  border-color: var(--asphalt);
+  background: var(--road);
+  font-weight: 700;
+}
+
+.type:has(input:focus-visible) {
+  outline: 3px solid var(--focus);
+  outline-offset: 1px;
+}

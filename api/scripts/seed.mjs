@@ -1,6 +1,10 @@
 // Kadıköy/Moda çevresinde örnek scooter bölgeleri oluşturur (POST /areas üzerinden).
-// Kullanım: API_URL=http://localhost:3000 npm run seed
+// Kullanım: API_URL=http://localhost:3000 API_KEY=dev-api-key npm run seed
 const API_URL = process.env.API_URL ?? 'http://localhost:3000';
+const headers = {
+  'content-type': 'application/json',
+  'x-api-key': process.env.API_KEY ?? 'dev-api-key',
+};
 
 /** [minLng, minLat, maxLng, maxLat] → kapalı dikdörtgen halka */
 const box = (minLng, minLat, maxLng, maxLat) => ({
@@ -97,7 +101,7 @@ const AREAS = [
   },
 ];
 
-const existing = await fetch(`${API_URL}/areas`).then((r) => {
+const existing = await fetch(`${API_URL}/areas`, { headers }).then((r) => {
   if (!r.ok) throw new Error(`GET /areas → ${r.status}`);
   return r.json();
 });
@@ -108,7 +112,7 @@ for (const area of AREAS) {
   if (names.has(area.name)) continue;
   const res = await fetch(`${API_URL}/areas`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers,
     body: JSON.stringify(area),
   });
   if (!res.ok) {

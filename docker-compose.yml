@@ -10,6 +10,9 @@ x-api-env: &api-env
   DB_POOL_SIZE: 20
   REDIS_URL: redis://redis:6379
   WORKER_CONCURRENCY: 32
+  # Yerel demo anahtarı; gerçek ortamda secret olarak verilmeli.
+  API_KEYS: ${API_KEY:-dev-api-key}
+  RATE_LIMIT_USER_PER_MIN: ${RATE_LIMIT_USER_PER_MIN:-60}
 
 services:
   postgres:
@@ -25,10 +28,10 @@ services:
       - max_connections=300
       - -c
       - shared_buffers=256MB
-      - -c
-      - synchronous_commit=off
+      # synchronous_commit varsayılan (on): giriş kayıtları diske yazılınca onaylanır.
+      # Giriş/çıkış olmayan konumlarda uygulama transaction içinde gevşetir (GeofenceService).
     ports:
-      - "5444:5432"
+      - "${POSTGRES_PORT:-5444}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/99-test-db.sql:ro
@@ -40,9 +43,12 @@ services:
 
   redis:
     image: redis:8-alpine
-    command: ["redis-server", "--appendonly", "no", "--maxmemory-policy", "noeviction"]
+    # Kuyruk diske yazılır (AOF, saniyede bir): Redis yeniden başlarsa bekleyen konumlar kaybolmaz.
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec", "--maxmemory-policy", "noeviction"]
+    volumes:
+      - redisdata:/data
     ports:
-      - "6390:6379"
+      - "${REDIS_PORT:-6390}:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 2s
@@ -64,7 +70,7 @@ services:
       <<: *api-env
       PORT: 3000
     ports:
-      - "3000:3000"
+      - "${API_PORT:-3000}:3000"
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -83,10 +89,30 @@ services:
       redis:
         condition: service_healthy
 
-  web:
-    build: ./web
+  # Operasyon: canlı harita, giriş kayıtları, alan yönetimi
+  ops:
+    build:
+      context: ./clients
+      args:
+        APP: ops
+    environment:
+      # Anahtar tarayıcıya gönderilmez; nginx API isteklerine ekler.
+      API_KEY: ${API_KEY:-dev-api-key}
     ports:
-      - "8080:80"
+      - "${OPS_PORT:-8080}:80"
+    depends_on:
+      - api
+
+  # Sürücü: konumu 5 saniyede bir gönderen cihaz uygulaması
+  driver:
+    build:
+      context: ./clients
+      args:
+        APP: driver
+    environment:
+      API_KEY: ${API_KEY:-dev-api-key}
+    ports:
+      - "${DRIVER_PORT:-8081}:80"
     depends_on:
       - api
 
@@ -95,6 +121,7 @@ services:
     profiles: ["loadtest"]
     environment:
       BASE_URL: http://api:3000
+      API_KEY: ${API_KEY:-dev-api-key}
     volumes:
       - ./loadtest:/scripts:ro
       - ./loadtest/results:/results
@@ -105,3 +132,4 @@ services:
 
 volumes:
   pgdata:
+  redisdata:

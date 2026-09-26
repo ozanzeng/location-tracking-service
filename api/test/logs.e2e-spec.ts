@@ -1,5 +1,6 @@
 import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
+import { DataSource } from 'typeorm';
 import { GeofenceService } from '../src/geofence/geofence.service.js';
 import {
   createTestApp,
@@ -42,7 +43,7 @@ describe('GET /logs (e2e)', () => {
     const seen: string[] = [];
     let cursor: string | null = null;
     do {
-      const res = await request(app.getHttpServer())
+      const res: request.Response = await request(app.getHttpServer())
         .get('/logs')
         .query({ limit: 2, ...(cursor ? { cursor } : {}) })
         .expect(200);
@@ -82,6 +83,15 @@ describe('GET /logs (e2e)', () => {
       .query({ active: false, from: at(2), to: at(6) })
       .expect(200);
     expect(entryTimes(range)).toEqual([at(4), at(2)]);
+  });
+
+  it('veritabanı bağlantısı zaman aşımlarıyla açılır', async () => {
+    const [row] = await app
+      .get(DataSource)
+      .query(
+        `SELECT current_setting('statement_timeout') AS st, current_setting('idle_in_transaction_session_timeout') AS it`,
+      );
+    expect(row).toEqual({ st: '5s', it: '30s' });
   });
 
   it('geçersiz sorgu parametrelerini reddeder', async () => {

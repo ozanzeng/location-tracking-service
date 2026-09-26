@@ -33,7 +33,9 @@ describe('Areas (e2e)', () => {
     const filtered = await request(app.getHttpServer())
       .get('/areas?type=PARKING')
       .expect(200);
-    expect(filtered.body.map((a: { name: string }) => a.name)).toEqual(['Park']);
+    expect(filtered.body.map((a: { name: string }) => a.name)).toEqual([
+      'Park',
+    ]);
   });
 
   it('kendini kesen poligonu PostGIS hatasıyla reddeder', async () => {

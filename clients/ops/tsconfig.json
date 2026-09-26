@@ -1,0 +1,5 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": { "paths": { "@shared/*": ["../shared/src/*"] } },
+  "include": ["src", "vite.config.ts", "../shared/src", "../shared/vite.ts"]
+}

@@ -6,6 +6,7 @@ import { check } from 'k6';
 const BASE_URL = __ENV.BASE_URL || 'http://localhost:3000';
 const PEAK_RPS = Number(__ENV.PEAK_RPS || 2000);
 const SCOOTERS = Number(__ENV.SCOOTERS || 5000);
+const API_KEY = __ENV.API_KEY || 'dev-api-key';
 
 export const options = {
   scenarios: {
@@ -43,7 +44,7 @@ export default function () {
     timestamp: new Date().toISOString(),
   });
   const res = http.post(`${BASE_URL}/locations`, body, {
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', 'x-api-key': API_KEY },
   });
   check(res, { 'status 202': (r) => r.status === 202 });
 }

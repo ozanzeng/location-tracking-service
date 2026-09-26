@@ -1,27 +1,26 @@
 import {
   Inject,
-  Logger,
   type OnModuleDestroy,
   type OnModuleInit,
 } from '@nestjs/common';
 import {
   ConnectedSocket,
   MessageBody,
+  type OnGatewayConnection,
   SubscribeMessage,
   WebSocketGateway,
   WebSocketServer,
 } from '@nestjs/websockets';
-import type { Redis } from 'ioredis';
 import type { Server, Socket } from 'socket.io';
 import { APP_CONFIG, type AppConfig } from '../config/configuration.js';
-import type { PositionUpdate } from '../geofence/geofence.types.js';
-import { createRedis } from '../queue/redis-connection.js';
+import { API_KEY_HEADER, isValidApiKey } from '../security/api-key.guard.js';
+import { PositionBuffer } from './position-buffer.js';
 import {
-  GEOFENCE_UPDATES_CHANNEL,
   MONITOR_ROOM,
   userRoom,
   type GeofenceUpdateMessage,
 } from './realtime.constants.js';
+import { RealtimeSubscriber } from './realtime.subscriber.js';
 
 interface SubscribePayload {
   monitor?: boolean;
@@ -29,39 +28,49 @@ interface SubscribePayload {
 }
 
 /**
- * Worker'ların Redis'e yayınladığı sonuçları Socket.IO client'larına iletir.
- * Her API instance kendi aboneliğini açtığı için yatay ölçeklemede de çalışır.
- * Pozisyonlar yük altında client'ları boğmasın diye kullanıcı başına son değer
- * tutulup belirli aralıklarla toplu gönderilir; alan olayları anında gider.
+ * Socket.IO tarafı: istemciler odalara abone olur (operasyon: monitor, sürücü: kendi kullanıcısı).
+ * Alan olayları anında gider; konumlar tamponlanıp belirli aralıklarla toplu gönderilir.
  */
-@WebSocketGateway({ cors: { origin: '*' } })
-export class RealtimeGateway implements OnModuleInit, OnModuleDestroy {
-  private readonly logger = new Logger(RealtimeGateway.name);
-  private subscriber: Redis | null = null;
+// CORS ayarı CorsIoAdapter'dan gelir (setup-app.ts).
+@WebSocketGateway()
+export class RealtimeGateway
+  implements OnModuleInit, OnModuleDestroy, OnGatewayConnection
+{
+  private readonly positions = new PositionBuffer();
   private flushTimer: NodeJS.Timeout | null = null;
-  private pending = new Map<string, PositionUpdate>();
 
   @WebSocketServer()
   server: Server;
 
-  constructor(@Inject(APP_CONFIG) private readonly config: AppConfig) {}
+  constructor(
+    @Inject(APP_CONFIG) private readonly config: AppConfig,
+    private readonly subscriber: RealtimeSubscriber,
+  ) {}
 
-  async onModuleInit(): Promise<void> {
+  onModuleInit(): void {
     if (!this.config.realtime.enabled) return;
-
-    this.subscriber = createRedis(this.config.redisUrl);
-    this.subscriber.on('message', (_channel, raw) => this.onUpdate(raw));
-    await this.subscriber.subscribe(GEOFENCE_UPDATES_CHANNEL);
-
+    this.subscriber.onUpdate((message) => this.onUpdate(message));
+    // Alan listesi herkese açık bilgi; tüm bağlı istemcilere iletilir.
+    this.subscriber.onAreasChanged((message) =>
+      this.server.emit('areas-changed', message),
+    );
     this.flushTimer = setInterval(
       () => this.flushPositions(),
       this.config.realtime.flushIntervalMs,
     );
   }
 
-  async onModuleDestroy(): Promise<void> {
+  onModuleDestroy(): void {
     if (this.flushTimer) clearInterval(this.flushTimer);
-    await this.subscriber?.quit();
+  }
+
+  /** HTTP ile aynı anahtar kuralı; geçersizse bağlantı hemen kapatılır. */
+  handleConnection(client: Socket): void {
+    const provided =
+      client.handshake.headers[API_KEY_HEADER] ?? client.handshake.auth?.apiKey;
+    if (!isValidApiKey(this.config.security.apiKeys, provided)) {
+      client.disconnect(true);
+    }
   }
 
   @SubscribeMessage('subscribe')
@@ -88,16 +97,8 @@ export class RealtimeGateway implements OnModuleInit, OnModuleDestroy {
     return { ok: true };
   }
 
-  private onUpdate(raw: string): void {
-    let message: GeofenceUpdateMessage;
-    try {
-      message = JSON.parse(raw) as GeofenceUpdateMessage;
-    } catch {
-      this.logger.warn('Geçersiz yayın mesajı atlandı');
-      return;
-    }
-
-    this.pending.set(message.position.userId, message.position);
+  private onUpdate(message: GeofenceUpdateMessage): void {
+    this.positions.add(message.position);
     for (const event of message.events) {
       this.server
         .to([MONITOR_ROOM, userRoom(event.userId)])
@@ -106,9 +107,8 @@ export class RealtimeGateway implements OnModuleInit, OnModuleDestroy {
   }
 
   private flushPositions(): void {
-    if (this.pending.size === 0) return;
-    const batch = [...this.pending.values()];
-    this.pending = new Map();
+    const batch = this.positions.drain();
+    if (batch.length === 0) return;
     this.server.to(MONITOR_ROOM).emit('positions', batch);
     for (const position of batch) {
       this.server.to(userRoom(position.userId)).emit('position', position);

@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { RealtimePublisher } from '../realtime/realtime.publisher.js';
 import { Area } from './area.entity.js';
 import type { CreateAreaDto } from './dto/create-area.dto.js';
 import type { AreaType } from './area-type.enum.js';
@@ -9,6 +10,7 @@ import type { AreaType } from './area-type.enum.js';
 export class AreasService {
   constructor(
     @InjectRepository(Area) private readonly areas: Repository<Area>,
+    private readonly publisher: RealtimePublisher,
   ) {}
 
   async create(dto: CreateAreaDto): Promise<Area> {
@@ -27,7 +29,12 @@ export class AreasService {
       type: dto.type,
       geom: dto.geometry,
     });
-    return this.areas.save(area);
+    const saved = await this.areas.save(area);
+    // Açık istemciler (sürücü, operasyon) yeni alanı sayfa yenilemeden görsün.
+    await this.publisher.publishAreasChanged({
+      created: { id: saved.id, name: saved.name, type: saved.type },
+    });
+    return saved;
   }
 
   findAll(type?: AreaType): Promise<Area[]> {

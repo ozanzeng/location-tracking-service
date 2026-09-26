@@ -1,0 +1,55 @@
+/* Leaflet ince ayarları */
+
+/* Yakınlaştırma düğmeleri: dokunmaya uygun boyut, arayüzün yazı tipi */
+.zoom-buttons {
+  position: absolute;
+  top: 0.75rem;
+  right: 0.75rem;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 1px 4px rgb(43 47 54 / 0.3);
+  overflow: hidden;
+}
+
+.zoom-buttons button {
+  width: 2.5rem;
+  height: 2.5rem;
+  padding: 0;
+  border: 0;
+  background: #fff;
+  color: var(--asphalt);
+  font-size: 1.4rem;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.zoom-buttons button + button {
+  border-top: 1px solid var(--line);
+}
+
+.zoom-buttons button:hover:not(:disabled) {
+  background: var(--road);
+}
+
+.zoom-buttons button:disabled {
+  color: #b0b4ba;
+  cursor: default;
+}
+
+/* OSM altlığı renkli; bölge renkleri öne çıksın diye soluk griye çekilir. */
+.leaflet-tile-pane {
+  filter: grayscale(1) contrast(0.62) brightness(1.14);
+}
+
+.leaflet-container {
+  font-family: inherit;
+}
+
+.leaflet-tooltip {
+  font-size: var(--step--1);
+  border-radius: 4px;
+}

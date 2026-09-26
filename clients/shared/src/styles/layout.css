@@ -1,0 +1,352 @@
+/* Kabuk */
+
+.app {
+  display: grid;
+  /* Sütun ekran genişliğini aşmasın; geniş tablolar kendi içinde kaydırılır. */
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto 1fr;
+  height: 100dvh;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 2rem;
+  padding: 0 1rem;
+  height: 3.5rem;
+  background: var(--asphalt);
+  color: var(--road);
+  /* Yol şeridi: kesik orta çizgi */
+  background-image: linear-gradient(90deg, var(--caution) 0 1.5rem, transparent 1.5rem 2.75rem);
+  background-size: 2.75rem 3px;
+  background-repeat: repeat-x;
+  background-position: 0 100%;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  color: inherit;
+  text-decoration: none;
+  font-weight: 800;
+  font-size: var(--step-1);
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+
+.brand__mark {
+  width: 1.4rem;
+  height: 1.4rem;
+  border-radius: 50%;
+  background:
+    linear-gradient(#fff, #fff) center / 64% 22% no-repeat,
+    var(--signal);
+}
+
+.brand__role {
+  color: #c9ccd1;
+  font-weight: 600;
+}
+
+.topbar__status {
+  margin-left: auto;
+  font-size: var(--step--1);
+  color: #c9ccd1;
+  white-space: nowrap;
+}
+
+.topbar nav {
+  display: flex;
+  gap: 0.25rem;
+  overflow-x: auto;
+}
+
+.topbar nav a {
+  padding: 0.4rem 0.75rem;
+  border-radius: 4px;
+  color: #c9ccd1;
+  text-decoration: none;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.topbar nav a:hover {
+  color: #fff;
+}
+
+.topbar nav a[aria-current='page'] {
+  color: var(--asphalt);
+  background: var(--road);
+}
+
+main {
+  min-width: 0;
+  min-height: 0;
+}
+
+.loading {
+  padding: 2rem;
+  color: var(--asphalt-soft);
+}
+
+/* Ekran: harita + panel */
+
+.view {
+  display: grid;
+  grid-template-columns: 1fr 22.5rem;
+  height: 100%;
+  min-height: 0;
+}
+
+.map-wrap {
+  position: relative;
+  min-height: 0;
+}
+
+.map {
+  position: absolute;
+  inset: 0;
+  background: #eef0ee;
+}
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  padding: 1.5rem 1.25rem 2rem;
+  overflow-y: auto;
+  background: var(--paper);
+  border-left: 1px solid var(--line);
+}
+
+.panel__head h1 {
+  margin: 0 0 0.4rem;
+  font-size: var(--step-3);
+  font-weight: 800;
+  line-height: 1.05;
+  letter-spacing: -0.02em;
+}
+
+.panel__head p {
+  margin: 0;
+  max-width: 34ch;
+  color: var(--asphalt-soft);
+}
+
+.panel h2 {
+  margin: 0 0 0.6rem;
+  font-size: var(--step-1);
+  font-weight: 800;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.field > label,
+.field__label {
+  font-weight: 700;
+}
+
+.field input:not([type='radio']),
+.field select {
+  width: 100%;
+  min-height: 2.5rem;
+  padding: 0.45rem 0.65rem;
+  border: 1.5px solid #c3c8c5;
+  border-radius: 6px;
+  background: #fff;
+}
+
+.field input:disabled,
+.field select:disabled {
+  background: var(--road);
+  color: var(--asphalt-soft);
+}
+
+.row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.row > input,
+.row > select {
+  flex: 1;
+  min-width: 0;
+}
+
+.hint {
+  margin: 0;
+  font-size: var(--step--1);
+  color: var(--asphalt-soft);
+}
+
+.error {
+  margin: 0;
+  font-size: var(--step--1);
+  color: #a3172a;
+  font-weight: 600;
+}
+
+.notice {
+  margin: 0;
+  padding: 0.45rem 0.6rem;
+  border-left: 3px solid var(--sign-blue);
+  background: #eaf1fa;
+  font-size: var(--step--1);
+  color: var(--asphalt);
+}
+
+.btn {
+  min-height: 2.5rem;
+  padding: 0.45rem 0.95rem;
+  border: 1.5px solid var(--asphalt);
+  border-radius: 6px;
+  background: #fff;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.btn--primary {
+  border-color: var(--sign-blue);
+  background: var(--sign-blue);
+  color: #fff;
+}
+
+.btn--quiet {
+  align-self: flex-start;
+  min-height: 0;
+  padding: 0.2rem 0;
+  border: 0;
+  background: none;
+  color: var(--sign-blue);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.segmented {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  padding: 3px;
+  border-radius: 8px;
+  background: #eceeed;
+}
+
+.segmented button {
+  min-height: 2.25rem;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  font-weight: 700;
+  color: var(--asphalt-soft);
+  cursor: pointer;
+}
+
+.segmented button[aria-checked='true'] {
+  background: #fff;
+  color: var(--asphalt);
+  box-shadow: 0 1px 2px rgb(43 47 54 / 0.18);
+}
+
+/* Bölge listeleri ve lejant */
+
+.zones,
+.legend {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.zones li,
+.legend li {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.zones small {
+  color: var(--asphalt-soft);
+  font-size: var(--step--1);
+}
+
+.legend {
+  padding-top: 1rem;
+  border-top: 1px solid var(--line);
+  font-size: var(--step--1);
+}
+
+.legend b {
+  font-size: var(--step-0);
+}
+
+.sign-icon {
+  flex: none;
+  display: block;
+}
+
+/* Canlı bağlantı göstergesi (sürücü: bağlantı, operasyon: soket) */
+
+.live {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.live::before {
+  content: '';
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 50%;
+  background: #2f9e5b;
+}
+
+.live--off::before {
+  background: #b0b4ba;
+}
+
+/* Mobil: harita üstte, panel altta */
+
+@media (max-width: 760px) {
+  .topbar {
+    gap: 0.75rem;
+    padding: 0 0.75rem;
+  }
+
+  .brand {
+    font-size: var(--step-0);
+  }
+
+  .topbar nav a {
+    padding: 0.35rem 0.5rem;
+    font-size: var(--step--1);
+  }
+
+  .view {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(0, 1fr) minmax(0, 45%);
+  }
+
+  .panel {
+    padding: 1rem 1rem 1.5rem;
+    border-left: 0;
+    border-top: 1px solid var(--line);
+  }
+
+  .panel__head h1 {
+    font-size: var(--step-2);
+  }
+}

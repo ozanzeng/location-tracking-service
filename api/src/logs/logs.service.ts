@@ -35,7 +35,9 @@ export class LogsService {
     if (query.userId) where.push(`l.user_id = ${param(query.userId)}`);
     if (query.areaId) where.push(`l.area_id = ${param(query.areaId)}`);
     if (query.active !== undefined) {
-      where.push(query.active ? 'l.exit_time IS NULL' : 'l.exit_time IS NOT NULL');
+      where.push(
+        query.active ? 'l.exit_time IS NULL' : 'l.exit_time IS NOT NULL',
+      );
     }
     if (query.from) where.push(`l.entry_time >= ${param(query.from)}`);
     if (query.to) where.push(`l.entry_time < ${param(query.to)}`);

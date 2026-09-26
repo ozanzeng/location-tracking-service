@@ -1,7 +1,18 @@
-import type { AreaEvent, PositionUpdate } from '../geofence/geofence.types.js';
+import type {
+  AreaEvent,
+  AreaRef,
+  PositionUpdate,
+} from '../geofence/geofence.types.js';
 
-/** Worker'lardan API instance'larına işlenmiş konum yayını. */
-export const GEOFENCE_UPDATES_CHANNEL = 'geofence:updates';
+/** Worker'lardan API instance'larına işlenmiş konum yayını; önek ortamları ayırır. */
+export const updatesChannel = (prefix: string) => `${prefix}:updates`;
+
+/** Alan listesi değişince (yeni alan) tüm istemcilere duyuru. */
+export const areasChannel = (prefix: string) => `${prefix}:areas`;
+
+export interface AreasChangedMessage {
+  created: AreaRef;
+}
 
 export interface GeofenceUpdateMessage {
   position: PositionUpdate;

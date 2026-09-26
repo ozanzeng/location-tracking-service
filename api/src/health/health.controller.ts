@@ -6,6 +6,7 @@ import type { Queue } from 'bullmq';
 import type { Response } from 'express';
 import { DataSource } from 'typeorm';
 import { LOCATION_QUEUE } from '../queue/location-job.js';
+import { Public } from '../security/public.decorator.js';
 
 /** Redis düşükken BullMQ komutları yeniden bağlanmayı bekler; health asılı kalmasın. */
 const withTimeout = <T>(promise: Promise<T>, ms = 2000): Promise<T> =>
@@ -16,9 +17,16 @@ const withTimeout = <T>(promise: Promise<T>, ms = 2000): Promise<T> =>
     ),
   ]);
 
-const JOB_STATES = ['waiting', 'active', 'delayed', 'failed', 'completed'] as const;
+const JOB_STATES = [
+  'waiting',
+  'active',
+  'delayed',
+  'failed',
+  'completed',
+] as const;
 
 @ApiTags('health')
+@Public()
 @Controller('health')
 export class HealthController {
   constructor(

@@ -1,55 +1,158 @@
 import { BadRequestException } from '@nestjs/common';
 import type { Queue } from 'bullmq';
-import type { DataSource } from 'typeorm';
 import { LOCATION_JOB, type LocationJobData } from '../queue/location-job.js';
+import type { UserRateLimiter } from '../security/user-rate-limiter.js';
 import { LocationsService } from './locations.service.js';
+import type { QueueBackpressure } from './queue-backpressure.js';
 
-describe('LocationsService.enqueue', () => {
+describe('LocationsService', () => {
   const now = new Date('2026-09-25T10:00:00.000Z');
+  const ts = '2026-09-25T09:59:00.000Z';
   let add: ReturnType<typeof vi.fn>;
+  let addBulk: ReturnType<typeof vi.fn>;
+  let consume: ReturnType<typeof vi.fn>;
+  let assertCapacity: ReturnType<typeof vi.fn>;
   let service: LocationsService;
 
   beforeEach(() => {
     add = vi.fn().mockResolvedValue({ id: '7' });
+    addBulk = vi
+      .fn()
+      .mockImplementation(async (jobs: unknown[]) =>
+        jobs.map((_, i) => ({ id: String(i + 1) })),
+      );
+    consume = vi.fn().mockResolvedValue(undefined);
+    assertCapacity = vi.fn();
     service = new LocationsService(
-      { add } as unknown as Queue<LocationJobData>,
-      {} as DataSource,
+      { add, addBulk } as unknown as Queue<LocationJobData>,
+      { consume } as unknown as UserRateLimiter,
+      { assertCapacity } as unknown as QueueBackpressure,
     );
   });
 
-  it('konumu istemcinin timestamp’iyle (UTC) kuyruğa atar', async () => {
-    const result = await service.enqueue(
-      { userId: 'u', lat: 1, lng: 2, timestamp: '2026-09-25T09:59:00+03:00' },
-      now,
-    );
-    expect(result).toEqual({
-      jobId: '7',
-      recordedAt: '2026-09-25T06:59:00.000Z',
+  describe('enqueue', () => {
+    it('konumu istemcinin timestamp’iyle (UTC) ve istek kimliğiyle kuyruğa atar', async () => {
+      const result = await service.enqueue(
+        { userId: 'u', lat: 1, lng: 2, timestamp: '2026-09-25T09:59:00+03:00' },
+        'req-1',
+        now,
+      );
+      expect(result).toEqual({
+        jobId: '7',
+        recordedAt: '2026-09-25T06:59:00.000Z',
+      });
+      expect(add).toHaveBeenCalledWith(LOCATION_JOB, {
+        userId: 'u',
+        points: [{ lat: 1, lng: 2, recordedAt: '2026-09-25T06:59:00.000Z' }],
+        requestId: 'req-1',
+      });
+      expect(consume).toHaveBeenCalledWith(new Map([['u', 1]]));
     });
-    expect(add).toHaveBeenCalledWith(LOCATION_JOB, {
-      userId: 'u',
-      lat: 1,
-      lng: 2,
-      recordedAt: '2026-09-25T06:59:00.000Z',
+
+    it('saat farkı payı içindeki timestamp’i kabul eder', async () => {
+      await expect(
+        service.enqueue(
+          {
+            userId: 'u',
+            lat: 1,
+            lng: 2,
+            timestamp: '2026-09-25T10:00:30.000Z',
+          },
+          undefined,
+          now,
+        ),
+      ).resolves.toBeDefined();
+    });
+
+    it('gelecekteki timestamp’i sınır kontrolünden önce reddeder', async () => {
+      await expect(
+        service.enqueue(
+          {
+            userId: 'u',
+            lat: 1,
+            lng: 2,
+            timestamp: '2026-09-25T10:05:00.000Z',
+          },
+          undefined,
+          now,
+        ),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(consume).not.toHaveBeenCalled();
+      expect(add).not.toHaveBeenCalled();
+    });
+
+    it('kuyruk doluysa rate limit sayacını harcamadan reddeder', async () => {
+      assertCapacity.mockImplementation(() => {
+        throw new Error('dolu');
+      });
+      await expect(
+        service.enqueue(
+          { userId: 'u', lat: 1, lng: 2, timestamp: ts },
+          undefined,
+          now,
+        ),
+      ).rejects.toThrow('dolu');
+      expect(consume).not.toHaveBeenCalled();
     });
   });
 
-  it('saat farkı payı içindeki timestamp’i kabul eder', async () => {
-    await expect(
-      service.enqueue(
-        { userId: 'u', lat: 1, lng: 2, timestamp: '2026-09-25T10:00:30.000Z' },
+  describe('enqueueBatch', () => {
+    it('kullanıcı başına tek iş oluşturur, noktaları zamana göre sıralar', async () => {
+      const result = await service.enqueueBatch(
+        [
+          {
+            userId: 'a',
+            lat: 3,
+            lng: 3,
+            timestamp: '2026-09-25T09:59:10.000Z',
+          },
+          { userId: 'b', lat: 2, lng: 2, timestamp: ts },
+          { userId: 'a', lat: 1, lng: 1, timestamp: ts },
+        ],
+        'req-2',
         now,
-      ),
-    ).resolves.toBeDefined();
-  });
+      );
+      expect(result).toEqual({ accepted: 3, jobIds: ['1', '2'] });
+      expect(addBulk).toHaveBeenCalledTimes(1);
+      const jobs = addBulk.mock.calls[0][0].map(
+        (j: { data: unknown }) => j.data,
+      );
+      expect(jobs).toEqual([
+        {
+          userId: 'a',
+          requestId: 'req-2',
+          points: [
+            { lat: 1, lng: 1, recordedAt: ts },
+            { lat: 3, lng: 3, recordedAt: '2026-09-25T09:59:10.000Z' },
+          ],
+        },
+        {
+          userId: 'b',
+          requestId: 'req-2',
+          points: [{ lat: 2, lng: 2, recordedAt: ts }],
+        },
+      ]);
+      expect(assertCapacity).toHaveBeenCalledWith(2);
+      expect(consume).toHaveBeenCalledWith(
+        new Map([
+          ['a', 2],
+          ['b', 1],
+        ]),
+      );
+    });
 
-  it('gelecekteki timestamp’i reddeder', async () => {
-    await expect(
-      service.enqueue(
-        { userId: 'u', lat: 1, lng: 2, timestamp: '2026-09-25T10:05:00.000Z' },
-        now,
-      ),
-    ).rejects.toBeInstanceOf(BadRequestException);
-    expect(add).not.toHaveBeenCalled();
+    it('bir konum geçersizse hiçbirini eklemez ve hangisi olduğunu söyler', async () => {
+      await expect(
+        service.enqueueBatch(
+          [
+            { userId: 'a', lat: 1, lng: 1, timestamp: ts },
+            { userId: 'a', lat: 1, lng: 1, timestamp: '2027-01-01T00:00:00Z' },
+          ],
+          undefined,
+          now,
+        ),
+      ).rejects.toThrow('locations.1.timestamp');
+      expect(addBulk).not.toHaveBeenCalled();
+    });
   });
 });
