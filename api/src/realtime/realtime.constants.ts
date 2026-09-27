@@ -21,3 +21,4 @@ export interface GeofenceUpdateMessage {
 
 export const MONITOR_ROOM = 'monitor';
 export const userRoom = (userId: string) => `user:${userId}`;
+export const isUserRoom = (room: string) => room.startsWith('user:');

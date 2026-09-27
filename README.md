@@ -35,7 +35,7 @@ cd api && npm ci && npm run seed    # Kadıköy/Moda çevresinde 10 örnek alan
 ```mermaid
 flowchart LR
   C[Sürücü uygulaması] -- POST /locations(/batch) --> API
-  API -- 202 + kuyruğa ekle --> R[(Redis<br/>BullMQ)]
+  API -- 202 + kullanıcının şeridine ekle --> R[(Redis / BullMQ<br/>64 kullanıcı şeridi)]
   R --> W1[Worker 1]
   R --> W2[Worker N]
   W1 & W2 -- tek transaction<br/>advisory lock --> PG[(PostGIS)]
@@ -47,14 +47,14 @@ flowchart LR
 ```
 
 - **API** (`api/src/main.ts`): İsteği doğrular, konumu kuyruğa ekler ve hemen `202` döner. Veritabanına yazmaz, bu yüzden ani yüklerde de hızlı kalır.
-- **Worker** (`api/src/worker.ts`): Aynı kod tabanından, HTTP sunucusu olmadan çalışır. `docker compose up --scale worker=N` ile yatayda çoğaltılır.
+- **Worker** (`api/src/worker.ts`): Aynı kod tabanından, HTTP sunucusu olmadan çalışır. `docker compose up --scale worker=N` ile yatayda çoğaltılır. Kuyruk kullanıcılara göre şeritlere bölünmüştür: aynı kullanıcının işleri tek tek, geliş sırasıyla işlenir, farklı şeritler paralel ilerler (bkz. Tasarım kararları).
 - **Realtime:** Worker'lar işlenmiş konumu Redis'e yayınlar. Her API instance kendi aboneliğiyle Socket.IO client'larına iletir; bu sayede API birden fazla instance'a çoğaltıldığında da çalışır.
 
 ## API
 
 | Endpoint | Açıklama |
 |---|---|
-| `POST /locations` | `{ userId, lat, lng, timestamp }`. Hepsi zorunlu, `timestamp` ISO 8601. Kuyruğa alınır, `202 { jobId, recordedAt }` döner. |
+| `POST /locations` | `{ userId, lat, lng, timestamp }`. Hepsi zorunlu, `timestamp` ISO 8601. Kuyruğa alınır, `202 { jobId, recordedAt }` döner (`jobId` "şerit:iş" biçiminde, ör. `17:123`). |
 | `POST /locations/batch` | `{ locations: [...] }`, en fazla 100 konum. Bağlantı koptuğunda biriken konumlar için. Doğrulama hepsi-ya-hiçbiri; `202 { accepted, jobIds }`. |
 | `GET /logs` | Alan girişleri, en yeni girişten eskiye. Filtreler: `userId`, `areaId`, `active` (hâlâ içeride mi), `from`/`to` (giriş zamanı aralığı). Sayfalama: `limit`, `cursor`. |
 | `POST /areas` | `{ name, type, geometry }`. Geometri GeoJSON Polygon, koordinatlar `[boylam, enlem]`. |
@@ -121,14 +121,14 @@ curl -H "$H" 'localhost:3000/logs?userId=scooter-1'
 
 **Coğrafi hesap PostGIS'te yapılır.** Alanlar `geometry(Polygon, 4326)` olarak saklanır ve **GiST index**'lidir. `ST_Contains` sorgusu önce index'teki sınırlayıcı kutularla adayları daraltır. Böylece alan sayısı binlere çıksa da her konum için tüm poligonlar taranmaz. Bir poligonun kendini kesmesi gibi geometrik hatalar `ST_IsValid` ile yakalanır ve `400` döner.
 
-**Eşzamanlılık ve sıra.** Kuyruk yüzünden aynı scooter'ın iki konumu iki farklı worker'da aynı anda işlenebilir. Bir konumun işlenmesi (`api/src/geofence/geofence.service.ts`) tek bir transaction içinde şu adımlardan oluşur:
+**Eşzamanlılık ve sıra.** Aynı kullanıcının işleri kuyrukta tek tek işlenir (bkz. kullanıcı şeritleri, aşağıda). Veritabanı tarafı yine de buna güvenmez: kilidi düştüğü için başka worker'a verilmiş bir iş, eski worker'da hâlâ sürüyor olabilir. Bir konumun işlenmesi (`api/src/geofence/geofence.service.ts`) tek bir transaction içinde şu adımlardan oluşur:
 
 1. `pg_advisory_xact_lock(hashtextextended(user_id))`: aynı kullanıcının konumları sırayla işlenir, farklı kullanıcılar birbirini beklemez.
 2. Konum, kullanıcının son işlenen konumundan eskiyse atlanır. Ağda gecikip geç gelen eski bir konum durumu geriye götürmez.
 3. Noktayı içeren alanlar, açık girişler ve son konum zamanı **tek sorguda** okunur.
 4. Fark hesaplanır. Yeni girişler, çıkışlar ve son konum **tek bir CTE sorgusuyla** yazılır.
 
-`test/geofence.e2e-spec.ts` testi aynı konumun 50 kopyasını paralel işler ve tam 1 giriş beklendiğini doğrular. Kilit kaldırıldığında test kırmızıya düşüyor: 50 kopyanın 20'si ayrı ayrı işlendi ve mükerrer log oluştu. Yani test gerçek bir hatayı yakalıyor.
+`test/geofence.e2e-spec.ts` testi aynı konumun 50 kopyasını servis seviyesinde paralel işler ve tam 1 giriş beklendiğini doğrular. Kilit kaldırıldığında test kırmızıya düşüyor: 50 kopyanın 20'si ayrı ayrı işlendi ve mükerrer log oluştu. Yani test gerçek bir hatayı yakalıyor.
 
 **İleri tarihli konumlar reddedilir.** `timestamp` sunucu saatinden 60 saniyeden fazla ilerideyse istek `400` alır. Aksi halde bu konum, sonraki gerçek konumların "eski" sayılıp atlanmasına yol açardı.
 
@@ -136,13 +136,27 @@ curl -H "$H" 'localhost:3000/logs?userId=scooter-1'
 
 **Ayarlar açılışta doğrulanır.** Ortam değişkenleri servis ayağa kalkmadan kontrol edilir. Verilmeyen değer için varsayılan kullanılır. Verilen ama geçersiz bir değer (ör. `DB_PORT=abc`, `REDIS_URL=http://...`, hatalı `CORS_ORIGINS`) sessizce varsayılana düşmez: servis bütün sorunları birlikte listeleyip 1 koduyla çıkar. Production'da API sunucusu `API_KEYS` olmadan ve 16 karakterden kısa bir anahtarla açılmaz. Worker, migration ve smoke betikleri anahtar kullanmadığı için bu kural onlara uygulanmaz.
 
-**Kuyruk ayarları.** Başarısız işler 3 kez, üstel artan bekleme süresiyle tekrar denenir. Tamamlanan işler Redis'te birikmez (`removeOnComplete`). Worker `concurrency` değeri env ile ayarlanır.
+**Kuyruk ayarları.** Tamamlanan işler Redis'te birikmez (`removeOnComplete`); başarısız işlerin son 5.000'i incelemek için tutulur. Yeniden deneme ve eşzamanlılık şerit tasarımının parçası (aşağıda).
 
 **Toplu istekte sıra korunur.** Toplu istekteki konumlar kullanıcı başına tek işte, zamana göre sıralı tutulur ve worker bunları sırayla işler. Ayrı işler olsalardı paralel worker'lar yeni noktayı eskiden önce işleyebilirdi. O zaman eski nokta "geç gelmiş" sayılıp atlanır ve bir alan girişi kaçabilirdi; e2e testi bu durumu ters sırada gönderilen noktalarla doğruluyor.
 
-**Aynı kullanıcının ayrı istekleri de sırayla işlenir.** Uzun bir kopukluktan sonra cihaz birikmiş konumları 100'lük istekler halinde art arda gönderir. Her istek ayrı bir iştir ve paralel worker'lar sonrakini öncekinden önce işleyebilir; bu durumda öncekinin noktaları "eski" sayılıp atlanır ve aradaki girişler/çıkışlar kaybolur. API her işe kullanıcı başına bir sıra numarası verir (Redis `INCR`, `api/src/queue/user-sequencer.ts`). Worker, sırası gelmemiş işi erteler; önceki iş bitince bekleyen ardılını hemen öne alır. Önceki iş 30 saniye boyunca hiç ilerlemezse (ör. sıra no alındıktan sonra kuyruğa eklenemediyse) kaybolmuş sayılır ve beklenmeden işlenir. Normal akışta (5 saniyede bir tek istek) hiçbir iş beklemez. e2e testi sonraki işi önce kuyruğa koyarak doğruluyor; sıra kontrolü kapatıldığında test kırmızıya düşüyor.
+**Aynı kullanıcının ayrı istekleri de sırayla işlenir: kullanıcı şeritleri.** Uzun bir kopukluktan sonra cihaz birikmiş konumları 100'lük istekler halinde art arda gönderir. Her istek ayrı bir iştir. Paralel worker'lar sonrakini öncekinden önce işlerse öncekinin noktaları "eski" sayılıp atlanır ve aradaki girişler/çıkışlar kaybolur. Bu yüzden kuyruk şeritlere bölündü (`QUEUE_LANES`, varsayılan 64; `api/src/queue/location-lanes.ts`):
 
-**Kuyruk dolarsa yük reddedilir (backpressure).** Worker'lar uzun süre yetişemezse kuyruk sınırsız büyüyüp Redis belleğini doldururdu. Bekleyen iş sayısı `QUEUE_MAX_BACKLOG`'u (varsayılan 200.000) aşınca API yeni konumları `503 Retry-After: 5` ile reddeder. Kuyruk derinliği her istekte sorulmaz; saniyede bir arka planda okunur, böylece sıcak yola ek bir Redis çağrısı eklenmez.
+- Her kullanıcı `userId`'nin hash'iyle (FNV-1a) hep aynı şeride düşer.
+- Şeritte aynı anda tek iş çalışır. Bu sınır BullMQ'nun kuyruk düzeyindeki global concurrency ayarıyla Redis'te uygulanır; worker süreci sayısından bağımsızdır.
+- Farklı şeritler paralel ilerler: aynı anda en fazla 64 iş işlenir, önceki 2 worker × 32 ayarıyla aynı paralellik.
+- Bedeli: yavaş bir iş aynı şeritteki diğer kullanıcıları (yaklaşık 1/64'ünü) bekletir. En dolu şeridin derinliği ayrı bir metrik olarak yayınlanır (`location_lane_backlog_max`).
+- Yeniden deneme işin içinde yapılır: nokta başına 3 deneme, aralarında 200 ve 400 ms. BullMQ'nun kendi yeniden denemesi işi şeridin sonuna atar ve sonraki iş öne geçerdi. Denemeleri tükenen iş başarısız sayılır, şerit hemen sıradaki işle devam eder.
+- Şerit sayısı API ve worker'da aynı olmalı. İlk açılan süreç sayıyı Redis'e yazar (`<önek>:lanes`); farklı sayıyla açılan worker açılmayı reddeder, API hatayı loglar. Değiştirmek için API durdurulur, kuyruk boşalınca bu anahtar silinir ve tüm süreçler yeni değerle açılır.
+- Şeritlerden önceki tek kuyrukta güncelleme sırasında kalmış işler de worker tarafından işlenir.
+
+`test/lanes.e2e-spec.ts` iki worker'ı aynı şeride bağlar ve işlerin hiç üst üste binmediğini, geliş sırasıyla işlendiğini doğrular. Global sınır kaldırıldığında test kırmızıya düşüyor.
+
+Önceki tasarım tek kuyruk ve kullanıcı başına sıra numarasıyla çalışıyordu: sırası gelmemiş iş erteleniyor, önceki bitince öne alınıyordu. İnceleme iki sorun buldu. Öne alınan iş aslında kuyruğun sonuna düşüyordu ve 30 saniyelik "takıldı" kuralı yavaş ama çalışan işi de geçiyordu. Yük testinde işleme hızı da yarıya inmişti (bkz. Performans).
+
+**Çöken worker'ın işi başkasına geçer.** Worker işin kilidini 10 saniyede bir yeniler. Süreç çöker ya da Redis'e ulaşamazsa kilit 20 saniye içinde düşer. Diğer worker'lar 5 saniyede bir kilidi düşmüş iş arar ve bulduğunu şeridin önüne geri koyar. Böylece şerit en fazla ~30 saniye bekler ve sıra bozulmaz: iş baştan işlenir, önceden işlenmiş noktaları "eski" sayılıp atlanır (`WORKER_LOCK_MS`, `WORKER_STALLED_CHECK_MS`). e2e testi takılan worker'ı kapatır; işin sırası bozulmadan diğer worker'da bittiğini doğrular.
+
+**Kuyruk dolarsa yük reddedilir (backpressure).** Worker'lar uzun süre yetişemezse kuyruk sınırsız büyüyüp Redis belleğini doldururdu. Tüm şeritlerde bekleyen iş sayısı `QUEUE_MAX_BACKLOG`'u (varsayılan 200.000) aşınca API yeni konumları `503 Retry-After: 5` ile reddeder. Kuyruk derinliği her istekte sorulmaz; saniyede bir arka planda okunur, böylece sıcak yola ek bir Redis çağrısı eklenmez.
 
 ## Veritabanı
 
@@ -171,7 +185,9 @@ Tasarım kararları, 3 milyon giriş kaydı ve 50 bin kullanıcılı ayrı bir b
 ## Güvenlik
 
 - **API anahtarı:** Servisin mobil uygulamanın backend'i veya bir API gateway tarafından çağrıldığı varsayıldı. İstemciler `x-api-key` ile doğrulanır. Anahtarlar sabit süreli karşılaştırılır, böylece karakter karakter tahmin edilemez. `API_KEYS` virgülle ayrılmış birden fazla anahtar alır, bu da anahtar değiştirirken eskisini kısa süre geçerli tutmayı sağlar. Tanımlı değilse doğrulama kapalıdır ve açılışta uyarı loglanır. Canlı yayın bağlantısı da aynı anahtarı el sıkışmada ister. Production'da 16 karakterden kısa anahtar kabul edilmez; bu, `dev-api-key` gibi herkesin bildiği demo anahtarlarını engeller.
-- **İki yetki seviyesi:** `API_KEYS` tam yetkilidir. `INGEST_API_KEYS` ise sadece konum gönderir, alan listesini okur ve canlı yayında tek bir kullanıcının odasına abone olur. Logları okuyamaz, alan oluşturamaz, tüm filonun canlı yayınına giremez (`403`). Herkese açık bir istemcinin (sürücü uygulaması) anahtarı sızsa bile zarar sınırlı kalır.
+- **İki yetki seviyesi:** `API_KEYS` tam yetkilidir. `INGEST_API_KEYS` ise sadece konum gönderir, alan listesini okur ve canlı yayında kullanıcı odasına abone olur. Logları okuyamaz, alan oluşturamaz, tüm filonun canlı yayınına giremez (`403`). Herkese açık bir istemcinin (sürücü uygulaması) anahtarı sızsa bile zarar sınırlı kalır.
+- **Sürücü bağlantısı tek odada:** Sürücü anahtarıyla açılan bir canlı yayın bağlantısı aynı anda tek kullanıcı odasında durur; yeni kullanıcıya abone olunca öncekinden çıkarılır. Tek bağlantıyla tüm filo dinlenemez. Ama birden çok bağlantı açan biri başka kullanıcıları dinleyebilir; bunun çözümü son kullanıcı kimliğidir (bkz. kapsam dışı).
+- **Ölü bağlantılar kapatılır:** Sunucu her canlı yayın bağlantısına 10 saniyede bir ping gönderir; 20 saniye içinde cevap vermeyen bağlantı kapatılır. Uygulaması kapanmış ya da ağı kopmuş cihazların bağlantıları en geç 30 saniyede temizlenir, bellekte ve oda listelerinde birikmez (`REALTIME_PING_INTERVAL_MS`, `REALTIME_PING_TIMEOUT_MS`).
 - **Rate limit (kullanıcı başına):** Varsayılan dakikada 60 konum. 5 saniyede bir gönderen cihaz dakikada 12 istek atar, yani 5 kat pay var. Sınır IP'ye göre değil kullanıcıya göre uygulanır, çünkü mobil kullanıcılar operatör NAT'ı arkasında aynı IP'yi paylaşabilir. Sayaç Redis'te tutulduğu için birden fazla API instance'ı arasında ortaktır. Kontrol ve artırma tek bir Lua betiğinde atomik yapılır. Sayacı sınırın altında olan kullanıcının isteği, sınırı tek başına aşsa bile kabul edilir; aksi halde uzun kopukluktan sonra gelen 100 konumluk toplu istek, 60'lık sınırla hiç geçemez ve cihazın kuyruğu kalıcı olarak tıkanırdı. Bu yüzden bir kullanıcı dakikada en fazla 60 - 1 + 100 konum gönderebilir. Reddedilen istek kotadan düşmez. IP bazlı genel koruma API gateway veya load balancer katmanının işidir.
 - **CORS:** Production'da varsayılan olarak kapalıdır; `CORS_ORIGINS` ile izin verilen adresler açıkça verilir. Demo istemcileri nginx üzerinden aynı adresten sunulduğu için CORS'a ihtiyaç duymaz.
 - **Demo istemcilerinin anahtarı:** Anahtarı nginx ekler; tarayıcı kodunda görünmez. Ama bu, anahtarı saklamak anlamına gelmez: o nginx'e erişebilen herkes anahtarın yetkisiyle istek atabilir. Bu yüzden herkese açık sürücü uygulamasına sadece `INGEST_API_KEYS` yetkisi verilir. Tam yetkili operasyon uygulaması production'da iç ağda, VPN'de ya da SSO arkasında yayınlanmalıdır.
@@ -181,8 +197,8 @@ Tasarım kararları, 3 milyon giriş kaydı ve 50 bin kullanıcılı ayrı bir b
 ## Gözlemlenebilirlik
 
 - **Metrikler (Prometheus):**
-  - API'de: HTTP istek süresi (rota şablonu, method, durum kodu), kabul edilen ve reddedilen konumlar (`reason`: rate_limited / backpressure), kuyruk derinliği.
-  - Worker'da: işleme süresi, kuyrukta bekleme süresi (`location_job_lag_seconds`), alan giriş ve çıkış sayıları, başarısız işler.
+  - API'de: HTTP istek süresi (rota şablonu, method, durum kodu), kabul edilen ve reddedilen konumlar (`reason`: rate_limited / backpressure), kuyruk derinliği (tüm şeritler) ve en dolu şeridin derinliği.
+  - Worker'da: işleme süresi, kuyrukta bekleme süresi (`location_job_lag_seconds`), alan giriş ve çıkış sayıları, denemeleri tükenen işler.
   - Her ikisinde de Node süreç metrikleri.
   - Worker'ın HTTP API'si olmadığı için metrikleri ayrı bir portta (`WORKER_METRICS_PORT`, varsayılan 9100) yayınlanır.
 - **Loglar:** Production'da tek satır JSON; log toplayıcılar doğrudan ayrıştırabilir. Seviye `LOG_LEVEL` ile, format `LOG_FORMAT=json|pretty` ile ayarlanır. Her istek için erişim logu `verbose` seviyesindedir ve varsayılan olarak kapalıdır, yük altında log hacmi patlamasın diye.
@@ -216,7 +232,18 @@ Güncel sürüm (dayanıklılık değişikliğinden önce), 2 worker, ısınmı�
 
 Worker sayısının etkisi (önceki sürümle ölçüldü): 1 worker ile 1.258, 2 worker ile 1.259 konum/sn. Sebebi aşağıda.
 
-**5 saniyelik gönderim sıklığına göre kapasite:** Kullanıcı başına saniyede 0,2 konum düşüyor. Ölçülen ortalama işleme hızı (~1.270 konum/sn) bu 2 vCPU'luk ortamda sürekli olarak yaklaşık **6.300 eşzamanlı aktif kullanıcıya** karşılık geliyor. Bunun üzerindeki ani yüklerde API hâlâ cevap veriyor, fark kuyrukta birikip sonra eritiliyor.
+**5 saniyelik gönderim sıklığına göre kapasite:** Kullanıcı başına saniyede 0,2 konum düşüyor. Dayanıklılık değişikliğinden sonraki işleme hızı (~1.130 konum/sn) bu 2 vCPU'luk ortamda sürekli olarak yaklaşık **5.650 eşzamanlı aktif kullanıcıya** karşılık geliyor (önceki ölçümle ~1.270 konum/sn, ~6.300 kullanıcı). Bunun üzerindeki ani yüklerde API hâlâ cevap veriyor, fark kuyrukta birikip sonra eritiliyor.
+
+**Kullanıcı şeritleri öncesi ve sonrası (aynı gün, aynı ortam, aynı k6 senaryosu, 2 worker):**
+
+| Tasarım | Kabul edilen konum | Hata | p50 | p95 | p99 | Ortalama işleme |
+|---|---|---|---|---|---|---|
+| Sıra numarası + erteleme (önceki) | 65.379 | %0,54 | 419 ms | 1,67 sn | 21,9 sn | 594 konum/sn |
+| **Kullanıcı şeritleri** | **77.089** | **%0** | **126 ms** | 1,94 sn | 11,1 sn | **720 konum/sn** |
+
+- Şeritlerle işleme hızı %21 arttı ve hata kalmadı. Önceki tasarımda 9 iş, önceki işin 30 saniye ilerlemediğine karar verip sırasını beklemeden işlendi (worker logu); şeritlerde böyle bir kural yok.
+- p95 iki tasarımda da benzer ve yukarıdaki tablodan çok kötü. Bu ölçümler sırasında makine başka işlerle meşguldü (yük ortalaması 5–8, açık tarayıcı sekmeleri) ve k6 hedeflenen 2.000 istek/sn'ye ulaşamadı. Bu yüzden karşılaştırma sadece birbirine göre anlamlı; mutlak sayılar için yukarıdaki kontrollü ölçümler geçerli.
+- Her tasarım birer kez ölçüldü.
 
 Sonuçların yorumu:
 - **API'nin gecikmesi işleme hızından bağımsız.** Tepe yükte işler kuyrukta birikiyor (en fazla yaklaşık 40 bin), ama API cevap vermeye devam ediyor ve kuyruk yük bittikten saniyeler sonra boşalıyor. Kuyruk mimarisinin amacı da buydu.
@@ -225,7 +252,7 @@ Sonuçların yorumu:
 
 ## Testler
 
-Hepsi tek komutla, yaklaşık 55 saniyede çalışır (stack ayakta olmalı):
+Hepsi tek komutla, yaklaşık 65 saniyede çalışır (stack ayakta olmalı):
 
 ```bash
 docker compose up -d --build
@@ -236,9 +263,9 @@ docker compose up -d --build
 
 | | Birim | E2E | Smoke (veri yazmaz*) |
 |---|---|---|---|
-| **Backend** | 105 test · `api: npm test` | 50 test · `api: npm run test:e2e` | `api: npm run smoke` |
+| **Backend** | 105 test · `api: npm test` | 59 test · `api: npm run test:e2e` | `api: npm run smoke` |
 | **Veritabanı** | 19 test · `api: npm run test:db` | (backend e2e içinde) | `api: npm run smoke:db` |
-| **Frontend** | 63 test · `clients: npm run test:unit` | 18 tarayıcı testi · `clients: npm run test:ui` | `clients: npm run smoke` |
+| **Frontend** | 65 test · `clients: npm run test:unit` | 18 tarayıcı testi · `clients: npm run test:ui` | `clients: npm run smoke` |
 
 \* Backend smoke testi, gerçek akışı denemek için tek bir sabit test alanı ve benzersiz bir test kullanıcısıyla konum gönderir.
 
@@ -246,7 +273,8 @@ Statik kontroller: `api: npm run lint && npm run typecheck` (testler dahil tam t
 
 **Backend birim** (Vitest):
 - Giriş/çıkış akışı (`GeofenceService`): kilit sırası; eski konumun atlanması; commit dayanıklılığının yalnızca giriş/çıkış yokken gevşetilmesi; olayların alan bilgisiyle üretilmesi.
-- Worker'ın noktaları sırayla işlemesi; sırası gelmemiş işi erteleyip önceki bitince öne alması, önceki iş takılırsa beklemeyi bırakması; eski biçimdeki (tek konumlu) işleri de işlemesi.
+- Worker'ın noktaları sırayla işlemesi; geçici hatada noktayı işin içinde yeniden denemesi (200 ve 400 ms bekleyerek), denemeler tükenince sonraki noktalara geçmemesi; eski biçimdeki (tek konumlu) işleri de işlemesi.
+- Kullanıcıların şeritlere kalıcı ve dengeli dağılması; worker'ın şerit sayısı uyuşmazsa hiçbir şeridi dinlemeden açılmayı reddetmesi.
 - Konum doğrulama, gruplama ve saat payı.
 - Kuyruk dolu koruması, kullanıcı başına rate limit, API anahtarı, istek kimliği, `Retry-After`.
 - Canlı yayın: bozuk ya da biçimi beklenmedik Redis mesajında çökmeme, konum tamponu.
@@ -263,11 +291,12 @@ Statik kontroller: `api: npm run lint && npm run typecheck` (testler dahil tam t
 - Case gereksinimlerinin madde madde doğrulanması (aşağıdaki tablo).
 - Giriş/çıkış/tekrar giriş, sırası karışık ve ileri tarihli konum, 50 paralel istekte tek giriş.
 - Toplu istek sırası, sayfalama ve filtreler.
-- Aynı kullanıcının ayrı işlerinin, sonraki önce kuyruğa girse de sırayla işlenmesi; eski biçimdeki işler.
-- API anahtarı ve sürücü anahtarının sınırları (HTTP ve WebSocket), rate limit (sınırdan büyük toplu istek, reddin kotadan düşmemesi), `503` backpressure, metrikler, canlı yayın ve alan duyurusu.
+- Kullanıcı şeritleri (gerçek Redis): iki worker aynı şeridi dinlerken işlerin üst üste binmemesi ve geliş sırası; denemeleri tükenen işin şeridi tıkamaması; çöken worker'ın işinin sırası bozulmadan diğer worker'a geçmesi; şerit sayısı uyuşmazlığı.
+- Birikmiş kuyrukta aynı kullanıcının işlerinin uçtan uca sırayla işlenmesi; şeritlerden önceki kuyrukta kalmış eski biçimdeki işler.
+- API anahtarı ve sürücü anahtarının sınırları (HTTP ve WebSocket; sürücü bağlantısının tek kullanıcı odasında tutulması), rate limit (sınırdan büyük toplu istek, reddin kotadan düşmemesi), `503` backpressure, metrikler, canlı yayın ve alan duyurusu, ping'e cevap vermeyen bağlantının kapatılması.
 
 **Frontend birim** (Vitest, hook'lar için jsdom):
-- **Gönderim kuyruğu (`useOutbox`):** çevrimdışı birikim ve tek toplu istek, 100'lük gruplar, `429`'da `Retry-After` kadar bekleme, ağ hatasında noktaları kaybetmeme. Toplu istek tek hatalı nokta yüzünden `400` alırsa grup ikiye bölünür; sadece o nokta atılır. Gönderim sürerken kuyruk dolup baştan kırpılsa bile gönderilmemiş noktalar silinmez.
+- **Gönderim kuyruğu (`useOutbox`):** çevrimdışı birikim ve tek toplu istek, 100'lük gruplar, `429`'da `Retry-After` kadar bekleme, ağ hatasında noktaları kaybetmeme. Toplu istek tek hatalı nokta yüzünden `400` alırsa grup ikiye bölünür; sadece o nokta atılır. Ardışık hatalı noktalar (ör. saati ileri cihaz) baştan bölme yapılmadan, her biri tek istekle atılır. Gönderim sürerken kuyruk dolup baştan kırpılsa bile gönderilmemiş noktalar silinmez.
 - **Giriş kayıtları (`useLogs`):** eski filtrenin geç gelen yanıtı ya da önceki sonraki-sayfa isteği yeni sonucu ezmez.
 - **Canlı sayaçlar:** "hizmet bölgesi dışında" sayısı haritadaki gri noktalarla aynı kurala dayanır.
 - **Rota planlama (`useRoutePlanner`):** durak ekleme/silme, yasak bölge sınırı.
@@ -354,10 +383,10 @@ api/src/
   areas/        POST/GET /areas, GeoJSON doğrulama
   locations/    yazma: POST /locations(/batch) → doğrulama ve gruplama (location-jobs), backpressure, kuyruk
                 okuma: GET /locations/latest (LatestLocationsService)
-  geofence/     giriş/çıkış tespiti: GeofenceService (akış) + GeofenceRepository (SQL) + BullMQ processor
+  geofence/     giriş/çıkış tespiti: GeofenceService (akış) + GeofenceRepository (SQL); şerit worker'ları (LaneWorkers) ve LocationProcessor
   logs/         GET /logs (giriş kayıtları), keyset sayfalama
   realtime/     RealtimeSubscriber (Redis) → RealtimeGateway (Socket.IO odaları), PositionBuffer, CORS adaptörü
-  queue/        BullMQ kuyruğu, iş biçimi, kullanıcı başına iş sırası (UserSequencer)
+  queue/        kullanıcı şeritleri (LocationLanes: şerit kuyrukları, ekleme, sayımlar), şerit hash'i, iş biçimi
   security/     API anahtarı guard'ı (tam / sadece konum yetkisi), Swagger dekoratörü, kullanıcı başına rate limit
   metrics/      Prometheus metrik tanımları ve /metrics
   health/       /health
@@ -396,7 +425,7 @@ loadtest/       k6 yük testi, demo filosu (fleet.mjs)
 
 Bunlar production için sıradaki adımlar olur:
 
-- **Son kullanıcı kimliği.** API anahtarı istemci uygulamayı doğrular; `userId` hâlâ istek gövdesinden geliyor. Sürücü anahtarını bilen biri başka bir `userId` adına konum gönderebilir ya da o kullanıcının canlı yayın odasına abone olabilir. Mobil cihaz servisi doğrudan çağıracaksa `userId`, gövde yerine imzalı bir token'dan (JWT) alınmalı.
+- **Son kullanıcı kimliği.** API anahtarı istemci uygulamayı doğrular; `userId` hâlâ istek gövdesinden geliyor. Sürücü anahtarını bilen biri başka bir `userId` adına konum gönderebilir ya da o kullanıcının canlı yayın odasına abone olabilir (bağlantı başına tek oda sınırı bunu sadece zorlaştırır). Mobil cihaz servisi doğrudan çağıracaksa `userId`, gövde yerine imzalı bir token'dan (JWT) alınmalı.
 - **Veri saklama ve partitioning.** `area_logs` sınırsız büyür. İlk adım: belirli günden eski kapanmış kayıtları küçük partiler halinde silen zamanlanmış bir iş. Asıl çözüm aylık partitioning ve eski ayları `DROP PARTITION` ile silmek; ancak "aynı alanda tek açık giriş" garantisi partition'lı tabloda tek bir unique index'le sağlanamaz. Önerilen tasarım: açık girişleri küçük ayrı bir partition'da tutmak (unique index orada), kapanan kayıt çıkışta zaman partition'ına taşınır.
 - **Alan güncelleme ve silme.** Bir alanın geometrisi değişince içinde bulunan kullanıcıların durumunun yeniden hesaplanması gerekir.
 - **Canlı yayın güvenilirliği.** Yayın şu an "en iyi çaba" ile yapılıyor; log zaten DB'de olduğu için veri kaybı yok. Yayının garanti olması gerekirse outbox deseni kullanılabilir.

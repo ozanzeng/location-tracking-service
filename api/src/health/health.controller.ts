@@ -1,11 +1,9 @@
-import { InjectQueue } from '@nestjs/bullmq';
 import { Controller, Get, Res } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { InjectDataSource } from '@nestjs/typeorm';
-import type { Queue } from 'bullmq';
 import type { Response } from 'express';
 import { DataSource } from 'typeorm';
-import { LOCATION_QUEUE } from '../queue/location-job.js';
+import { LocationLanes } from '../queue/location-lanes.js';
 import { Public } from '../security/public.decorator.js';
 
 /** Redis düşükken BullMQ komutları yeniden bağlanmayı bekler; health asılı kalmasın. */
@@ -31,7 +29,7 @@ const JOB_STATES = [
 export class HealthController {
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
-    @InjectQueue(LOCATION_QUEUE) private readonly queue: Queue,
+    private readonly lanes: LocationLanes,
   ) {}
 
   @Get()
@@ -42,8 +40,8 @@ export class HealthController {
         () => 'up' as const,
         () => 'down' as const,
       ),
-      // Sayımlar Redis'ten okunur; başarısızsa Redis erişilemez demektir.
-      withTimeout(this.queue.getJobCounts(...JOB_STATES)).catch(() => null),
+      // Sayımlar Redis'ten okunur (tüm şeritlerin toplamı); başarısızsa Redis erişilemez demektir.
+      withTimeout(this.lanes.counts(...JOB_STATES)).catch(() => null),
     ]);
     const redis = queue ? 'up' : 'down';
 

@@ -69,6 +69,43 @@ describe('Canlı yayın (e2e)', () => {
     });
   });
 
+  it('sürücü bağlantısı aynı anda tek kullanıcı odasında durur; tam yetkili bağlantı birden çok odada', async () => {
+    const connected = (socket: Socket) =>
+      new Promise<void>((resolve) => socket.on('connect', () => resolve()));
+    const driver = connect(DRIVER_KEY);
+    const ops = connect(KEY);
+    await Promise.all([connected(driver), connected(ops)]);
+    for (const userId of ['room-a', 'room-b']) {
+      await driver.emitWithAck('subscribe', { userId });
+      await ops.emitWithAck('subscribe', { userId });
+    }
+
+    const seenBy = (socket: Socket) => {
+      const users = new Set<string>();
+      socket.on('position', (p: { userId: string }) => users.add(p.userId));
+      return users;
+    };
+    const driverSaw = seenBy(driver);
+    const opsSaw = seenBy(ops);
+    for (const userId of ['room-a', 'room-b']) {
+      await request(app.getHttpServer())
+        .post('/locations')
+        .set('x-api-key', KEY)
+        .send({
+          userId,
+          ...INSIDE,
+          timestamp: new Date(Date.now() - 1000).toISOString(),
+        })
+        .expect(202);
+    }
+
+    await vi.waitFor(() =>
+      expect(opsSaw).toEqual(new Set(['room-a', 'room-b'])),
+    );
+    // Sürücü ikinci aboneliğinde ilk odadan çıkarıldı: sadece room-b'yi görür.
+    expect(driverSaw).toEqual(new Set(['room-b']));
+  });
+
   it('yeni alan oluşturulunca bağlı istemcilere duyurur', async () => {
     const socket = connect(KEY);
     await new Promise<void>((resolve) => socket.on('connect', () => resolve()));
@@ -120,5 +157,74 @@ describe('Canlı yayın (e2e)', () => {
       eventType: 'ENTER',
       area: { name: 'Moda' },
     });
+  });
+});
+
+describe('Canlı yayın bağlantı sağlığı (e2e)', () => {
+  let app: INestApplication;
+  let port: number;
+
+  beforeAll(async () => {
+    app = await createTestApp({
+      withWorker: false,
+      config: (c) => ({
+        ...c,
+        realtime: {
+          ...c.realtime,
+          enabled: true,
+          pingIntervalMs: 100,
+          pingTimeoutMs: 200,
+        },
+        security: { ...c.security, apiKeys: [KEY] },
+      }),
+    });
+    port = (app.getHttpServer().address() as AddressInfo).port;
+  });
+  afterAll(() => app.close());
+
+  it("ping'e cevap vermeyen bağlantıyı ping aralığı + bekleme süresi içinde kapatır", async () => {
+    // Ham engine.io bağlantısı: ping'lere ("2") hiç cevap ("3") vermez, uygulaması
+    // kapanmış ya da ağı kopmuş bir cihaz gibi.
+    const ws = new WebSocket(
+      `ws://localhost:${port}/socket.io/?EIO=4&transport=websocket`,
+    );
+    const opened = Date.now();
+    const handshake = new Promise<{
+      pingInterval: number;
+      pingTimeout: number;
+    }>((resolve) =>
+      ws.addEventListener('message', (e) => {
+        const data = String(e.data);
+        if (data.startsWith('0')) resolve(JSON.parse(data.slice(1)));
+      }),
+    );
+    const closed = new Promise<number>((resolve) =>
+      ws.addEventListener('close', () => resolve(Date.now() - opened)),
+    );
+
+    expect(await handshake).toMatchObject({
+      pingInterval: 100,
+      pingTimeout: 200,
+    });
+    const after = await closed;
+    expect(after).toBeGreaterThanOrEqual(250);
+    expect(after).toBeLessThan(1500);
+  });
+
+  it("ping'e cevap veren bağlantı açık kalır", async () => {
+    const socket = io(`http://localhost:${port}`, {
+      transports: ['websocket'],
+      reconnection: false,
+      extraHeaders: { 'x-api-key': KEY },
+    });
+    try {
+      await new Promise<void>((resolve) =>
+        socket.on('connect', () => resolve()),
+      );
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      expect(socket.connected).toBe(true);
+    } finally {
+      socket.close();
+    }
   });
 });

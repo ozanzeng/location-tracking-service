@@ -29,9 +29,15 @@ export function useOutbox(online: boolean) {
   const retryAt = useRef(0);
   /**
    * 400'de grup ikiye bölünür, tek başına reddedilen nokta bulunana kadar küçülür;
-   * o nokta atılınca tam boyuta döner.
+   * bölme sırasında sağlam çıkan grup sonrakini ikiye katlar.
    */
   const batchLimit = useRef(MAX_BATCH);
+  /**
+   * Hatalı nokta atıldıktan sonra sıradaki tek nokta denenir. O da reddedilirse bölme
+   * yapılmadan atılır; ardışık hatalı noktalar (ör. cihaz saati ileride) nokta başına tek
+   * istek harcar. Sağlamsa grup hemen tam boyuta döner.
+   */
+  const probing = useRef(false);
   const nextLogId = useRef(0);
   const [pending, setPending] = useState(0);
   const [log, setLog] = useState<DeviceLogEntry[]>([]);
@@ -68,7 +74,8 @@ export function useOutbox(online: boolean) {
       const { requestId } = await api.sendLocations(batch);
       remove(batch);
       // Bölme sırasında sağlam çıkan grup: hatalı noktaya yaklaşırken grup yavaşça büyür.
-      batchLimit.current = Math.min(MAX_BATCH, batchLimit.current * 2);
+      batchLimit.current = probing.current ? MAX_BATCH : Math.min(MAX_BATCH, batchLimit.current * 2);
+      probing.current = false;
       addLog(
         'sent',
         batch.length === 1 ? 'Konum gönderildi' : `Biriken ${batch.length} konum toplu gönderildi`,
@@ -96,7 +103,8 @@ export function useOutbox(online: boolean) {
       } else if (e.status === 400) {
         // Tek nokta: tekrar gönderilse de düzelmez; kuyruğu tıkamasın diye atılır.
         remove(batch);
-        batchLimit.current = MAX_BATCH;
+        batchLimit.current = 1;
+        probing.current = true;
         addLog('error', `Sunucu konumu reddetti: ${e.message} (400)`, e.requestId);
       } else {
         retryAt.current = Date.now() + NETWORK_RETRY_MS;

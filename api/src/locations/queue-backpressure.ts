@@ -1,4 +1,3 @@
-import { InjectQueue } from '@nestjs/bullmq';
 import {
   HttpStatus,
   Inject,
@@ -7,11 +6,14 @@ import {
   type OnModuleDestroy,
   type OnModuleInit,
 } from '@nestjs/common';
-import type { Queue } from 'bullmq';
 import { APP_CONFIG, type AppConfig } from '../config/configuration.js';
 import { RetryableHttpException } from '../common/http/retryable.exception.js';
-import { locationsRejected, queueBacklog } from '../metrics/metrics.js';
-import { LOCATION_QUEUE } from '../queue/location-job.js';
+import {
+  laneBacklogMax,
+  locationsRejected,
+  queueBacklog,
+} from '../metrics/metrics.js';
+import { LocationLanes } from '../queue/location-lanes.js';
 
 /**
  * Worker'lar uzun süre yetişemezse kuyruk sınırsız büyüyüp Redis belleğini doldurur.
@@ -28,7 +30,7 @@ export class QueueBackpressure implements OnModuleInit, OnModuleDestroy {
   private refreshing = false;
 
   constructor(
-    @InjectQueue(LOCATION_QUEUE) private readonly queue: Queue,
+    private readonly lanes: LocationLanes,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
   ) {}
 
@@ -48,8 +50,10 @@ export class QueueBackpressure implements OnModuleInit, OnModuleDestroy {
     if (this.refreshing) return;
     this.refreshing = true;
     try {
-      this.backlog = await this.queue.getWaitingCount();
+      const perLane = await this.lanes.waitingPerLane();
+      this.backlog = perLane.reduce((sum, n) => sum + n, 0);
       queueBacklog.set(this.backlog);
+      laneBacklogMax.set(Math.max(0, ...perLane));
     } catch (err) {
       // Okunamazsa son değer korunur; Redis gerçekten düştüyse kuyruğa ekleme zaten hata verir.
       this.logger.warn(`Kuyruk derinliği okunamadı: ${(err as Error).message}`);

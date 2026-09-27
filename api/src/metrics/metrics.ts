@@ -36,7 +36,12 @@ export const locationsRejected = new Counter({
 
 export const queueBacklog = new Gauge({
   name: 'location_queue_backlog',
-  help: 'Kuyrukta işlenmeyi bekleyen konum sayısı (API son okuma)',
+  help: 'Kuyrukta işlenmeyi bekleyen iş sayısı, tüm şeritlerin toplamı (API son okuma)',
+});
+
+export const laneBacklogMax = new Gauge({
+  name: 'location_lane_backlog_max',
+  help: 'En dolu şeritte bekleyen iş sayısı; diğerlerinden çok yüksekse o şeritte yavaş bir iş vardır',
 });
 
 export const jobDuration = new Histogram({
@@ -60,5 +65,5 @@ export const areaTransitions = new Counter({
 
 export const jobFailures = new Counter({
   name: 'location_job_failures_total',
-  help: 'Başarısız konum işleri (her deneme ayrı sayılır)',
+  help: 'Başarısız konum işleri (işin içindeki denemeler tükendikten sonra)',
 });

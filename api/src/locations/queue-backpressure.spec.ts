@@ -1,15 +1,18 @@
 import { HttpStatus } from '@nestjs/common';
-import type { Queue } from 'bullmq';
 import { RetryableHttpException } from '../common/http/retryable.exception.js';
 import { loadConfig } from '../config/configuration.js';
+import { laneBacklogMax, queueBacklog } from '../metrics/metrics.js';
+import type { LocationLanes } from '../queue/location-lanes.js';
 import { QueueBackpressure } from './queue-backpressure.js';
 
+/** Tek şeritte `n` iş bekliyor gibi davranan sahte şeritler. */
 const withBacklog = (
   maxBacklog: number,
   getWaitingCount: () => Promise<number>,
+  waitingPerLane = async () => [await getWaitingCount()],
 ) => {
   const base = loadConfig({});
-  return new QueueBackpressure({ getWaitingCount } as unknown as Queue, {
+  return new QueueBackpressure({ waitingPerLane } as unknown as LocationLanes, {
     ...base,
     backpressure: { ...base.backpressure, maxBacklog },
   });
@@ -52,6 +55,18 @@ describe('QueueBackpressure', () => {
     const bp = withBacklog(0, async () => 1_000_000);
     await bp.refresh();
     expect(() => bp.assertCapacity(1)).not.toThrow();
+  });
+
+  it('eşik tüm şeritlerin toplamına uygulanır; en dolu şerit ayrıca yayınlanır', async () => {
+    const bp = withBacklog(
+      10,
+      async () => 0,
+      async () => [3, 4, 0, 3],
+    );
+    await bp.refresh();
+    expect(() => bp.assertCapacity(1)).toThrow(RetryableHttpException);
+    expect((await queueBacklog.get()).values[0].value).toBe(10);
+    expect((await laneBacklogMax.get()).values[0].value).toBe(4);
   });
 
   it('önceki okuma bitmeden yenisini başlatmaz (Redis yanıt vermezken birikmez)', async () => {

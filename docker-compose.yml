@@ -14,7 +14,8 @@ x-api-env: &api-env
   DB_NAME: geofence
   DB_POOL_SIZE: 20
   REDIS_URL: redis://redis:6379
-  WORKER_CONCURRENCY: 32
+  # Kullanıcı şeritleri: aynı anda en fazla bu kadar iş işlenir. API ve worker'da aynı olmalı.
+  QUEUE_LANES: 64
   # Yerel demo anahtarları; gerçek ortamda secret olarak verilmeli.
   # Tam yetki (operasyon, betikler) ve sadece konum gönderme (sürücü uygulaması).
   API_KEYS: ${API_KEY:-dev-api-key}

@@ -44,12 +44,12 @@ describe('loadConfig doğrulama', () => {
   it('hatalı sayıları sessizce varsayılana düşürmez', () => {
     const problems = problemsFor({
       DB_PORT: 'abc',
-      WORKER_CONCURRENCY: '0',
+      QUEUE_LANES: '0',
       PORT: '3000.5',
     });
     expect(problems).toHaveLength(3);
     expect(problems.join('\n')).toMatch(/DB_PORT .*"abc"/);
-    expect(problems.join('\n')).toMatch(/WORKER_CONCURRENCY/);
+    expect(problems.join('\n')).toMatch(/QUEUE_LANES/);
   });
 
   it('bütün sorunları birlikte raporlar', () => {

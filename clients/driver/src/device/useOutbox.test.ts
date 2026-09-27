@@ -106,6 +106,41 @@ describe('useOutbox (cihaz gönderim kuyruğu)', () => {
     expect(result.current.log.some((e) => e.kind === 'error' && e.text.includes('(400)'))).toBe(true);
   });
 
+  test('ardışık hatalı noktaların her biri tek istekle atılır, baştan bölme yapılmaz', async () => {
+    // Cihaz saati ileride: sunucu her noktayı "timestamp gelecekte" diye reddeder.
+    sendLocations.mockRejectedValue(new ApiError('timestamp gelecekte olamaz', 400, null, 'r'));
+    const { result, rerender } = renderHook(({ online }) => useOutbox(online), { initialProps: { online: false } });
+    act(() => {
+      for (let i = 0; i < 40; i++) result.current.record(point(i));
+    });
+    rerender({ online: true });
+    await tick(60_000);
+    // İlk bölme ~log2(40) istek, sonra nokta başına bir istek. Önceki kod her noktada
+    // sınırı 100'e döndürüp baştan bölüyordu (nokta başına ~6 istek).
+    expect(result.current.pending).toBe(0);
+    expect(sendLocations.mock.calls.length).toBeLessThanOrEqual(40 + 7);
+  });
+
+  test('hatalı nokta atıldıktan sonra sıradaki nokta sağlamsa grup hemen tam boyuta döner', async () => {
+    const bad = point(0);
+    sendLocations.mockImplementation(async (points: LocationPoint[]) => {
+      if (points.includes(bad)) throw new ApiError('hatalı', 400, null, 'r');
+      return { requestId: 'r' };
+    });
+    const { result, rerender } = renderHook(({ online }) => useOutbox(online), { initialProps: { online: false } });
+    act(() => {
+      result.current.record(bad);
+      for (let i = 1; i < 300; i++) result.current.record(point(i));
+    });
+    rerender({ online: true });
+    await tick(30_000);
+    expect(result.current.pending).toBe(0);
+    // 300 → 100'lük grup reddedilir, bölünür, hatalı nokta atılır; sonra tek nokta denenir
+    // ve kalanlar 100'lük gruplarla gider.
+    const sizes = sendLocations.mock.calls.map((c) => (c[0] as LocationPoint[]).length);
+    expect(sizes.slice(-4)).toEqual([1, 100, 100, 98]);
+  });
+
   test('gönderim sürerken kuyruk dolup baştan kırpılırsa gönderilmemiş noktalar silinmez', async () => {
     let resolveSend: (v: { requestId: string }) => void = () => {};
     sendLocations.mockImplementationOnce(() => new Promise((resolve) => (resolveSend = resolve)));

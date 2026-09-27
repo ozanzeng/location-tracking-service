@@ -17,14 +17,29 @@ export interface AppConfig {
     name: string;
     /** Redis üzerindeki BullMQ anahtar öneki; testler kendi önekini kullanır. */
     prefix: string;
+    /**
+     * Şerit sayısı: her kullanıcı sabit bir şeride düşer, şeritte aynı anda tek iş çalışır.
+     * Aynı anda işlenebilecek en fazla iş sayısıdır. API ve worker'da aynı olmalı.
+     */
+    lanes: number;
   };
   worker: {
-    concurrency: number;
+    /**
+     * İşin kilit süresi (ms). Worker kilidi bunun yarısı aralıkla yeniler; yenileyemezse
+     * (çöktü, bağlantısı koptu) iş başka worker'a geçer.
+     */
+    lockMs: number;
+    /** Kilidi düşmüş işlerin aranma aralığı (ms). */
+    stalledCheckMs: number;
   };
   realtime: {
     enabled: boolean;
     /** Canlı pozisyonların socket'e toplu gönderilme aralığı (ms). */
     flushIntervalMs: number;
+    /** Sunucunun bağlantılara ping gönderme aralığı (ms). */
+    pingIntervalMs: number;
+    /** Ping'e bu süre içinde cevap vermeyen bağlantı kapatılır (ms). */
+    pingTimeoutMs: number;
   };
   security: {
     /** Tam yetkili API anahtarları. Boşsa kimlik doğrulama kapalıdır (yerel geliştirme). */
@@ -198,13 +213,21 @@ export function loadConfig(
     queue: {
       name: env.QUEUE_NAME ?? 'locations',
       prefix: env.QUEUE_PREFIX ?? 'geofence',
+      // Önceki 2 worker × 32 eşzamanlı iş ile aynı paralellik.
+      lanes: int('QUEUE_LANES', 64, 1, 1024),
     },
     worker: {
-      concurrency: int('WORKER_CONCURRENCY', 32, 1, 1000),
+      // Çöken worker'ın işi en geç ~30 sn içinde başka worker'a geçer:
+      // kilit 20 sn içinde düşer, 5 sn'lik iki aramada bulunur.
+      lockMs: int('WORKER_LOCK_MS', 20_000, 1000, 600_000),
+      stalledCheckMs: int('WORKER_STALLED_CHECK_MS', 5000, 100, 600_000),
     },
     realtime: {
       enabled: env.REALTIME_ENABLED !== 'false',
       flushIntervalMs: int('REALTIME_FLUSH_MS', 200, 20, 10_000),
+      // Yanıt vermeyen bağlantı en geç 10 + 20 = 30 sn içinde kapatılır.
+      pingIntervalMs: int('REALTIME_PING_INTERVAL_MS', 10_000, 100, 300_000),
+      pingTimeoutMs: int('REALTIME_PING_TIMEOUT_MS', 20_000, 100, 300_000),
     },
     security: {
       apiKeys,

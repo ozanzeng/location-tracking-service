@@ -20,6 +20,7 @@ import {
 } from '../security/api-key.guard.js';
 import { PositionBuffer } from './position-buffer.js';
 import {
+  isUserRoom,
   MONITOR_ROOM,
   userRoom,
   type GeofenceUpdateMessage,
@@ -95,7 +96,17 @@ export class RealtimeGateway
     }
     if (payload?.monitor) void client.join(MONITOR_ROOM);
     if (typeof payload?.userId === 'string' && payload.userId.length <= 64) {
-      void client.join(userRoom(payload.userId));
+      const room = userRoom(payload.userId);
+      // Sürücü anahtarıyla açılan bağlantı aynı anda tek kullanıcı odasında durur: yeni
+      // kullanıcıya abone olunca öncekinden çıkar. Tek bağlantıyla tüm filo dinlenemez.
+      // Birden çok bağlantı açan biri yine başka kullanıcıları dinleyebilir; bunun çözümü
+      // userId'nin imzalı token'dan alınmasıdır (README, kapsam dışı).
+      if (scope === 'ingest') {
+        for (const joined of client.rooms) {
+          if (isUserRoom(joined) && joined !== room) void client.leave(joined);
+        }
+      }
+      void client.join(room);
     }
     return { ok: true };
   }

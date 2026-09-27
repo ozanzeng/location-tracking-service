@@ -1,8 +1,5 @@
-import { getQueueToken } from '@nestjs/bullmq';
 import type { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
-import type { Queue } from 'bullmq';
-import { Redis } from 'ioredis';
 import { DataSource } from 'typeorm';
 import { AppModule } from '../src/app.module.js';
 import {
@@ -10,7 +7,7 @@ import {
   type AppConfig,
   loadConfig,
 } from '../src/config/configuration.js';
-import { LOCATION_QUEUE } from '../src/queue/location-job.js';
+import { LocationLanes } from '../src/queue/location-lanes.js';
 import { setupApp } from '../src/setup-app.js';
 import { WorkerModule } from '../src/worker.module.js';
 
@@ -40,17 +37,12 @@ export async function createTestApp(
 }
 
 export async function resetState(app: INestApplication): Promise<void> {
-  const queue = app.get<Queue>(getQueueToken(LOCATION_QUEUE));
-  await queue.drain(true);
-  // Boşaltılan işlerin sıra no'ları hiç tamamlanmaz; kalırsa sonraki testin işleri bekler.
-  const config = app.get<AppConfig>(APP_CONFIG);
-  const redis = new Redis(config.redisUrl);
-  try {
-    const seqKeys = await redis.keys(`${config.queue.prefix}:seq:*`);
-    if (seqKeys.length) await redis.del(...seqKeys);
-  } finally {
-    await redis.quit();
-  }
+  await Promise.all(
+    app
+      .get(LocationLanes)
+      .queues()
+      .map((queue) => queue.drain(true)),
+  );
   await app
     .get(DataSource)
     .query(
@@ -63,10 +55,10 @@ export async function waitForQueueDrain(
   app: INestApplication,
   timeoutMs = 15_000,
 ): Promise<void> {
-  const queue = app.get<Queue>(getQueueToken(LOCATION_QUEUE));
+  const lanes = app.get(LocationLanes);
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    const counts = await queue.getJobCounts(
+    const counts = await lanes.counts(
       'waiting',
       'active',
       'delayed',

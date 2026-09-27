@@ -15,7 +15,12 @@ export function setupApp(app: INestApplication): void {
   app.getHttpAdapter().getInstance().disable('x-powered-by');
   const origin = corsOrigin(config.security.corsOrigins);
   app.enableCors({ origin });
-  app.useWebSocketAdapter(new CorsIoAdapter(app, origin));
+  app.useWebSocketAdapter(
+    new CorsIoAdapter(app, origin, {
+      pingInterval: config.realtime.pingIntervalMs,
+      pingTimeout: config.realtime.pingTimeoutMs,
+    }),
+  );
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,

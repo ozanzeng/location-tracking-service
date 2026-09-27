@@ -42,7 +42,7 @@ export class LocationsController {
   })
   @ApiAcceptedResponse({
     schema: {
-      example: { jobId: '123', recordedAt: '2026-09-25T10:00:00.000Z' },
+      example: { jobId: '17:123', recordedAt: '2026-09-25T10:00:00.000Z' },
     },
   })
   create(@Body() dto: CreateLocationDto, @RequestId() requestId?: string) {
@@ -58,7 +58,7 @@ export class LocationsController {
       'Cihazın biriktirdiği konumları tek istekte gönderir. Doğrulama hepsi-ya-hiçbiri: bir konum geçersizse hiçbiri kuyruğa alınmaz.',
   })
   @ApiAcceptedResponse({
-    schema: { example: { accepted: 2, jobIds: ['124', '125'] } },
+    schema: { example: { accepted: 2, jobIds: ['17:124', '3:125'] } },
   })
   createBatch(
     @Body() dto: CreateLocationBatchDto,

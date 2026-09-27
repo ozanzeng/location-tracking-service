@@ -1,10 +1,8 @@
-import { getQueueToken } from '@nestjs/bullmq';
 import type { INestApplication } from '@nestjs/common';
-import type { Queue } from 'bullmq';
 import { Redis } from 'ioredis';
 import request from 'supertest';
 import { loadConfig } from '../src/config/configuration.js';
-import { LOCATION_JOB, LOCATION_QUEUE } from '../src/queue/location-job.js';
+import { LocationLanes } from '../src/queue/location-lanes.js';
 import {
   createTestApp,
   INSIDE,
@@ -216,11 +214,11 @@ describe('Kuyruk doluyken backpressure (e2e)', () => {
       .expect(202);
     expect(res.body.jobId).toBeDefined();
 
-    const queue = app.get<Queue>(getQueueToken(LOCATION_QUEUE));
-    await queue.addBulk(
-      Array.from({ length: 5 }, () => ({
-        name: LOCATION_JOB,
-        data: { userId: `bp-${run}`, points: [] },
+    // Eşik tüm şeritlerin toplamına uygulanır: işler farklı şeritlere dağılsın.
+    await app.get(LocationLanes).addMany(
+      Array.from({ length: 5 }, (_, i) => ({
+        userId: `bp-${run}-${i}`,
+        points: [],
       })),
     );
     await new Promise((resolve) => setTimeout(resolve, 150));

@@ -1,9 +1,11 @@
-import { getQueueToken } from '@nestjs/bullmq';
 import type { INestApplication } from '@nestjs/common';
-import type { Queue } from 'bullmq';
 import request from 'supertest';
-import { LOCATION_JOB, LOCATION_QUEUE } from '../src/queue/location-job.js';
-import { UserSequencer } from '../src/queue/user-sequencer.js';
+import { laneOf } from '../src/queue/lanes.js';
+import { LocationLanes } from '../src/queue/location-lanes.js';
+import {
+  LEGACY_LOCATION_QUEUE,
+  LOCATION_JOB,
+} from '../src/queue/location-job.js';
 import { GeofenceService } from '../src/geofence/geofence.service.js';
 import {
   createTestApp,
@@ -167,38 +169,40 @@ describe('Konum → alan giriş/çıkış (e2e)', () => {
     expect(await logsFor('u5')).toHaveLength(1);
   });
 
-  it('aynı kullanıcının ayrı istekleri, sonraki önce kuyruğa girse de sırayla işlenir', async () => {
-    // Uzun kopukluktan sonra cihaz birikmiş konumları 100'lük isteklerle gönderir; paralel
-    // worker'lar sonraki isteği önce işlerse öncekinin noktaları "eski" sayılıp atlanırdı.
-    const queue = app.get<Queue>(getQueueToken(LOCATION_QUEUE));
-    const [first] = await app.get(UserSequencer).next(['u7']);
-    const [second] = await app.get(UserSequencer).next(['u7']);
-    const job = (seq: number, points: Array<[typeof INSIDE, number]>) => ({
-      userId: 'u7',
-      seq,
-      points: points.map(([p, s]) => ({ ...p, recordedAt: at(s) })),
-    });
-
-    await queue.add(LOCATION_JOB, job(second, [[OUTSIDE, 10]]));
-    await new Promise((resolve) => setTimeout(resolve, 300));
-    await queue.add(
-      LOCATION_JOB,
-      job(first, [
-        [OUTSIDE, 0],
-        [INSIDE, 1],
-        [OUTSIDE, 2],
-      ]),
-    );
+  it('aynı kullanıcının kuyrukta birikmiş ayrı işleri sırayla işlenir', async () => {
+    // Uzun kopukluktan sonra cihaz birikmiş konumları art arda isteklerle gönderir ve işler
+    // kuyrukta birikir. Paralel işlenselerdi sonraki önce bitebilir, öncekinin noktaları
+    // "eski" sayılıp atlanır ve aradaki girişler kaybolurdu. Şerit: aynı kullanıcının işleri
+    // tek tek, geliş sırasıyla. Birikmeyi garantilemek için şerit istekler bitene kadar durur.
+    // Not: tek süreçte paralel işler DB kilidine alındıkları sırayla girdiği için bu test
+    // "şeritte tek iş" kuralını tek başına kanıtlamaz; o kural lanes.e2e-spec.ts'te iki
+    // worker ve gecikmeyle doğrulanır. Bu test API → şerit → worker → log akışını birikmiş
+    // kuyrukla uçtan uca doğrular.
+    const lanes = app.get(LocationLanes);
+    const lane = lanes.queues()[laneOf('u7', lanes.count)];
+    await lane.pause();
+    try {
+      for (let s = 0; s < 30; s++) {
+        await sendLocation('u7', s % 2 ? INSIDE : OUTSIDE, s);
+      }
+      expect(await lane.getWaitingCount()).toBe(30);
+    } finally {
+      await lane.resume();
+    }
     await waitForQueueDrain(app);
 
-    expect((await logsFor('u7')).map((l) => [l.entryTime, l.exitTime])).toEqual(
-      [[at(1), at(2)]],
-    );
+    const logs = await logsFor('u7');
+    expect(logs).toHaveLength(15);
+    expect(logs.at(-1)).toMatchObject({ entryTime: at(1), exitTime: at(2) });
+    expect(logs[0]).toMatchObject({ entryTime: at(29), exitTime: null });
   });
 
-  it('eski biçimdeki (tek konumlu) iş kuyrukta kaldıysa da işlenir', async () => {
-    const queue = app.get<Queue>(getQueueToken(LOCATION_QUEUE));
-    await queue.add(LOCATION_JOB, {
+  it('şeritlerden önceki kuyrukta kalmış eski biçimdeki (tek konumlu) iş de işlenir', async () => {
+    const legacy = app
+      .get(LocationLanes)
+      .queues()
+      .find((q) => q.name === LEGACY_LOCATION_QUEUE)!;
+    await legacy.add(LOCATION_JOB, {
       userId: 'u8',
       ...INSIDE,
       recordedAt: at(0),
