@@ -47,12 +47,16 @@ export function useOutbox(online: boolean) {
     setLog((list) => [entry, ...list].slice(0, 40));
   }, []);
 
+  /** Kaydedilen konum saniyelik zamanlayıcıyı beklemeden gönderilsin diye flush'a erişim. */
+  const flushNow = useRef<() => void>(() => {});
+
   const record = useCallback(
     (point: LocationPoint) => {
       queue.current.push(point);
       if (queue.current.length > MAX_QUEUE) queue.current.splice(0, queue.current.length - MAX_QUEUE);
       setPending(queue.current.length);
       if (!online) addLog('queued', `Çevrimdışı: konum sıraya alındı (${queue.current.length} bekliyor)`);
+      flushNow.current();
     },
     [online, addLog],
   );
@@ -130,6 +134,10 @@ export function useOutbox(online: boolean) {
       setPending(queue.current.length);
     }
   }, [online, addLog, remove]);
+
+  useEffect(() => {
+    flushNow.current = () => void flush();
+  }, [flush]);
 
   useEffect(() => {
     if (online && queue.current.length > 0) {

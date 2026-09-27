@@ -2,6 +2,8 @@ import type { LatLng } from './geo/latlng';
 
 /** Case: mobil uygulama aktifken yaklaşık 5 saniyede bir konum gönderir. */
 export const GPS_INTERVAL_MS = 5000;
+/** Bölge sınırında yapılan ek ölçümler arasında en az bu kadar süre olur (rate limit payı). */
+export const MIN_SAMPLE_GAP_MS = 1000;
 /** Rota oynatılırken konumun güncellenme aralığı. */
 export const PLAYBACK_TICK_MS = 500;
 /** Bölge bildiriminin (levhanın) ekranda kalma süresi. */

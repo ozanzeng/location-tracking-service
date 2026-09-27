@@ -36,6 +36,14 @@ describe('useOutbox (cihaz gönderim kuyruğu)', () => {
     expect(result.current.log[0].text).toBe('Konum gönderildi');
   });
 
+  test('kaydedilen konum saniyelik zamanlayıcıyı beklemeden gönderilir', async () => {
+    const { result } = renderHook(() => useOutbox(true));
+    await tick(300); // zamanlayıcının bir sonraki turuna daha 700 ms var
+    act(() => result.current.record(point(1)));
+    await tick(0);
+    expect(sendLocations).toHaveBeenCalledWith([point(1)]);
+  });
+
   test('çevrimdışıyken birikir, bağlanınca tek toplu istekle gider', async () => {
     const { result, rerender } = renderHook(({ online }) => useOutbox(online), { initialProps: { online: false } });
     act(() => {
