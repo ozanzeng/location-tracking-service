@@ -5,6 +5,7 @@ import type { UserLocation } from '../queue/location-job.js';
 import { GeofenceRepository, type Transition } from './geofence.repository.js';
 import type { AreaEvent, AreaRef, ProcessResult } from './geofence.types.js';
 import { diffPresence } from './presence-diff.js';
+import { ProcessStatus } from './process-status.enum.js';
 
 @Injectable()
 export class GeofenceService {
@@ -28,7 +29,7 @@ export class GeofenceService {
         state.lastRecordedAt &&
         state.lastRecordedAt >= new Date(location.recordedAt)
       ) {
-        return { status: 'stale' } as const;
+        return { status: ProcessStatus.STALE } as const;
       }
 
       const { entered, exited } = diffPresence(
@@ -47,7 +48,7 @@ export class GeofenceService {
       );
 
       return {
-        status: 'processed',
+        status: ProcessStatus.PROCESSED,
         events: toEvents(location, transitions, [
           ...state.present,
           ...state.inside,

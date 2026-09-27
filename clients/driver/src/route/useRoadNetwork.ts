@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { Area } from '@shared/api/types';
+import { AreaType, type Area } from '@shared/api/types';
 import { zonesOfType } from '../geo/zone';
 import { loadRoadNetwork } from '../roads/loadRoads';
 import type { RoadNetwork } from '../roads/RoadNetwork';
@@ -23,7 +23,7 @@ export function useRoadNetwork(areas: Area[]) {
     };
   }, []);
 
-  const noRideZones = useMemo(() => zonesOfType(areas, 'NO_RIDE'), [areas]);
+  const noRideZones = useMemo(() => zonesOfType(areas, AreaType.NO_RIDE), [areas]);
   const restrictions = useMemo(() => (roads ? roads.restrict(noRideZones) : null), [roads, noRideZones]);
 
   return { roads, restrictions, error };

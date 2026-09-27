@@ -1,6 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { IsEnum, IsNotEmpty, IsString, MaxLength } from 'class-validator';
 import type { Polygon } from 'geojson';
+import { AREA_NAME_MAX_LENGTH } from '../../config/limits.js';
 import { AreaType } from '../area-type.enum.js';
 import { IsGeoJsonPolygon } from '../geojson-polygon.validator.js';
 
@@ -8,7 +9,7 @@ export class CreateAreaDto {
   @ApiProperty({ example: 'Kadıköy Sahil - Sürüş Yasak' })
   @IsString()
   @IsNotEmpty()
-  @MaxLength(120)
+  @MaxLength(AREA_NAME_MAX_LENGTH)
   name: string;
 
   @ApiProperty({ enum: AreaType, example: AreaType.NO_RIDE })

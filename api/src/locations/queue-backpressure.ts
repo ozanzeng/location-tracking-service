@@ -13,6 +13,7 @@ import {
   locationsRejected,
   queueBacklog,
 } from '../metrics/metrics.js';
+import { RejectionReason } from '../metrics/rejection-reason.enum.js';
 import { LocationLanes } from '../queue/location-lanes.js';
 
 /**
@@ -65,7 +66,7 @@ export class QueueBackpressure implements OnModuleInit, OnModuleDestroy {
   assertCapacity(incoming: number): void {
     const { maxBacklog } = this.config.backpressure;
     if (maxBacklog > 0 && this.backlog >= maxBacklog) {
-      locationsRejected.inc({ reason: 'backpressure' }, incoming);
+      locationsRejected.inc({ reason: RejectionReason.BACKPRESSURE }, incoming);
       throw new RetryableHttpException(
         HttpStatus.SERVICE_UNAVAILABLE,
         'Sistem yoğun, konum daha sonra tekrar gönderilmeli',

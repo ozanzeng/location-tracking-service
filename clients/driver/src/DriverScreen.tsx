@@ -18,7 +18,7 @@ import { ScooterIdField } from './rider/ScooterIdField';
 import { useRiderEvents } from './rider/useRiderEvents';
 import { useRiderPosition } from './rider/useRiderPosition';
 import { useScooterId } from './rider/useScooterId';
-import { MovementPanel, type MoveMode } from './route/MovementPanel';
+import { MovementPanel, MoveMode } from './route/MovementPanel';
 import { RouteDrawing } from './route/RouteDrawing';
 import { RouteLayer } from './route/RouteLayer';
 import { useRoadNetwork } from './route/useRoadNetwork';
@@ -32,7 +32,7 @@ export function DriverScreen() {
   const [riding, setRiding] = useState(false);
   const [online, setOnline] = useState(true);
   const [rideNotice, setRideNotice] = useState<string | null>(null);
-  const [mode, setMode] = useState<MoveMode>('drag');
+  const [mode, setMode] = useState<MoveMode>(MoveMode.DRAG);
   const [speedKmh, setSpeedKmh] = useState(25);
 
   const { position, live, moveTo } = useRiderPosition(START_POSITION);
@@ -71,7 +71,7 @@ export function DriverScreen() {
     clearRoute();
   }, [live, moveTo, clearRoute]);
 
-  const drawing = mode === 'route' && !playback.playing && roads !== null;
+  const drawing = mode === MoveMode.ROUTE && !playback.playing && roads !== null;
 
   return (
     <div className="view">
@@ -92,7 +92,7 @@ export function DriverScreen() {
           <RiderMarker
             position={position}
             zone={riderZone(riding, currentAreas)}
-            draggable={mode === 'drag' && !playback.playing}
+            draggable={mode === MoveMode.DRAG && !playback.playing}
             roads={roads}
             restrictions={restrictions}
             live={live}

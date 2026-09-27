@@ -9,13 +9,14 @@ import {
   MaxLength,
   Min,
 } from 'class-validator';
+import { USER_ID_MAX_LENGTH, USER_ID_PATTERN } from '../../config/limits.js';
 
 export class CreateLocationDto {
   @ApiProperty({ example: 'scooter-42' })
   @IsString()
   @IsNotEmpty()
-  @MaxLength(64)
-  @Matches(/^[A-Za-z0-9_.:-]+$/, {
+  @MaxLength(USER_ID_MAX_LENGTH)
+  @Matches(USER_ID_PATTERN, {
     message: 'userId sadece harf, rakam ve _ . : - içerebilir',
   })
   userId: string;

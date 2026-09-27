@@ -6,9 +6,8 @@ import {
   IsArray,
   ValidateNested,
 } from 'class-validator';
+import { MAX_BATCH_SIZE } from '../../config/limits.js';
 import { CreateLocationDto } from './create-location.dto.js';
-
-export const MAX_BATCH_SIZE = 100;
 
 export class CreateLocationBatchDto {
   @ApiProperty({

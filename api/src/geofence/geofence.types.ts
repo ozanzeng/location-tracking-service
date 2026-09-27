@@ -1,5 +1,6 @@
 import type { AreaType } from '../areas/area-type.enum.js';
 import type { AreaEventType } from './area-event-type.enum.js';
+import type { ProcessStatus } from './process-status.enum.js';
 
 export interface AreaRef {
   id: string;
@@ -26,5 +27,9 @@ export interface PositionUpdate {
 }
 
 export type ProcessResult =
-  | { status: 'stale' }
-  | { status: 'processed'; events: AreaEvent[]; position: PositionUpdate };
+  | { status: ProcessStatus.STALE }
+  | {
+      status: ProcessStatus.PROCESSED;
+      events: AreaEvent[];
+      position: PositionUpdate;
+    };

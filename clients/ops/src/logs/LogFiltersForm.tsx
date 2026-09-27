@@ -1,5 +1,5 @@
 import type { Area } from '@shared/api/types';
-import type { LogFilters } from './logFilters';
+import { LogStatusFilter, type LogFilters } from './logFilters';
 
 interface Props {
   value: LogFilters;
@@ -38,9 +38,9 @@ export function LogFiltersForm({ value, areas, onChange, onSubmit, onReset }: Pr
       <label>
         Durum
         <select value={value.status} onChange={(e) => set('status', e.target.value as LogFilters['status'])}>
-          <option value="all">Tümü</option>
-          <option value="inside">Hâlâ içeride</option>
-          <option value="left">Çıkmış</option>
+          <option value={LogStatusFilter.ALL}>Tümü</option>
+          <option value={LogStatusFilter.INSIDE}>Hâlâ içeride</option>
+          <option value={LogStatusFilter.LEFT}>Çıkmış</option>
         </select>
       </label>
       <label>

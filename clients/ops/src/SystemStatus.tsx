@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '@shared/api/client';
-import type { Health } from '@shared/api/types';
+import { HealthStatus, type Health } from '@shared/api/types';
+import { HEALTH_POLL_MS } from './config';
 
 /** /health'ten servis durumu: veritabanı, Redis ve kuyrukta bekleyen konumlar. */
 export function SystemStatus() {
@@ -19,7 +20,7 @@ export function SystemStatus() {
         () => active && setUnreachable(true),
       );
     void poll();
-    const timer = setInterval(poll, 5000);
+    const timer = setInterval(poll, HEALTH_POLL_MS);
     return () => {
       active = false;
       clearInterval(timer);
@@ -28,7 +29,7 @@ export function SystemStatus() {
 
   if (unreachable) return <p className="topbar__status status--down">Servise ulaşılamıyor</p>;
   if (!health) return null;
-  const ok = health.status === 'ok';
+  const ok = health.status === HealthStatus.OK;
   const waiting = health.queue ? health.queue.waiting + health.queue.active : 0;
   return (
     <p

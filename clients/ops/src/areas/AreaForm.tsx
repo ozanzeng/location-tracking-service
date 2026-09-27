@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { AreaType } from '@shared/api/types';
+import { AreaType } from '@shared/api/types';
 import { SignIcon } from '@shared/zones/SignIcon';
 import { ZONES, ZONE_ORDER } from '@shared/zones/zoneStyles';
 
@@ -14,7 +14,7 @@ interface Props {
 /** Çizilen alanın adı ve tipi. */
 export function AreaForm({ saving, error, onSave, onDiscard }: Props) {
   const [name, setName] = useState('');
-  const [type, setType] = useState<AreaType>('NO_RIDE');
+  const [type, setType] = useState<AreaType>(AreaType.NO_RIDE);
 
   return (
     <form

@@ -52,6 +52,23 @@ describe('loadConfig doğrulama', () => {
     expect(problems.join('\n')).toMatch(/QUEUE_LANES/);
   });
 
+  it("kuyruk ve worker ayarlarını env'den okur", () => {
+    const config = loadConfig({
+      QUEUE_KEEP_COMPLETED: '200',
+      QUEUE_KEEP_FAILED: '300',
+      WORKER_POINT_ATTEMPTS: '5',
+      WORKER_RETRY_DELAY_MS: '50',
+    });
+    expect(config.queue).toMatchObject({ keepCompleted: 200, keepFailed: 300 });
+    expect(config.worker).toMatchObject({
+      pointAttempts: 5,
+      retryBaseDelayMs: 50,
+    });
+    expect(problemsFor({ WORKER_POINT_ATTEMPTS: '0' })).toEqual([
+      expect.stringMatching(/WORKER_POINT_ATTEMPTS/),
+    ]);
+  });
+
   it('bütün sorunları birlikte raporlar', () => {
     const problems = problemsFor({
       REDIS_URL: 'http://localhost:6379',

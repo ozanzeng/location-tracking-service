@@ -94,6 +94,29 @@ describe('GET /logs (e2e)', () => {
     expect(row).toEqual({ st: '5s', it: '30s' });
   });
 
+  it('Swagger belgesi sayısal sorgu parametrelerini sınırlarıyla birlikte sayı olarak gösterir', async () => {
+    const { body } = await request(app.getHttpServer())
+      .get('/docs-json')
+      .expect(200);
+    const param = (path: string, name: string) =>
+      body.paths[path].get.parameters.find(
+        (p: { name: string }) => p.name === name,
+      ).schema;
+    expect(param('/logs', 'limit')).toMatchObject({
+      type: 'number',
+      default: 50,
+      maximum: 500,
+    });
+    expect(param('/locations/latest', 'sinceMinutes')).toMatchObject({
+      type: 'number',
+      maximum: 1440,
+    });
+    expect(param('/locations/latest', 'limit')).toMatchObject({
+      type: 'number',
+      maximum: 5000,
+    });
+  });
+
   it('geçersiz sorgu parametrelerini reddeder', async () => {
     await request(app.getHttpServer()).get('/logs?limit=0').expect(400);
     await request(app.getHttpServer()).get('/logs?areaId=nope').expect(400);

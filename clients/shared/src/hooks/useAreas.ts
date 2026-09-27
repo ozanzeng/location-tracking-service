@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api/client';
 import type { Area } from '../api/types';
+import { SocketEvent } from '../realtime/events';
 import { getSocket } from '../realtime/socket';
 
 let cache: Promise<Area[]> | null = null;
@@ -31,9 +32,9 @@ export function useAreas() {
     load();
     const socket = getSocket();
     const onChanged = () => load(true);
-    socket.on('areas-changed', onChanged);
+    socket.on(SocketEvent.AREAS_CHANGED, onChanged);
     return () => {
-      socket.off('areas-changed', onChanged);
+      socket.off(SocketEvent.AREAS_CHANGED, onChanged);
     };
   }, [load]);
 

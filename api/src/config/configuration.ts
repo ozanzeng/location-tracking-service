@@ -1,3 +1,5 @@
+import { isProduction, LOG_LEVELS, LogFormat } from './runtime.enum.js';
+
 export interface AppConfig {
   port: number;
   db: {
@@ -22,6 +24,10 @@ export interface AppConfig {
      * Aynı anda işlenebilecek en fazla iş sayısıdır. API ve worker'da aynı olmalı.
      */
     lanes: number;
+    /** İncelemek için Redis'te tutulan tamamlanmış iş sayısı (tüm şeritlerin toplamı). */
+    keepCompleted: number;
+    /** İncelemek için Redis'te tutulan başarısız iş sayısı (tüm şeritlerin toplamı). */
+    keepFailed: number;
   };
   worker: {
     /**
@@ -31,6 +37,10 @@ export interface AppConfig {
     lockMs: number;
     /** Kilidi düşmüş işlerin aranma aralığı (ms). */
     stalledCheckMs: number;
+    /** Geçici hatada bir noktanın en fazla deneme sayısı (işin içinde). */
+    pointAttempts: number;
+    /** Denemeler arası ilk bekleme (ms); her denemede ikiye katlanır. */
+    retryBaseDelayMs: number;
   };
   realtime: {
     enabled: boolean;
@@ -74,8 +84,6 @@ export class ConfigError extends Error {
   }
 }
 
-const LOG_LEVELS = ['fatal', 'error', 'warn', 'log', 'debug', 'verbose'];
-
 /** Production'da anahtarın en kısa uzunluğu: "dev-api-key" gibi tahmin edilebilir değerler geçmesin. */
 export const MIN_PRODUCTION_KEY_LENGTH = 16;
 
@@ -97,7 +105,7 @@ export function loadConfig(
   options: LoadConfigOptions = {},
 ): AppConfig {
   const problems: string[] = [];
-  const production = env.NODE_ENV === 'production';
+  const production = isProduction(env);
 
   const int = (
     name: string,
@@ -189,7 +197,7 @@ export function loadConfig(
   }
 
   oneOf('REALTIME_ENABLED', ['true', 'false']);
-  oneOf('LOG_FORMAT', ['json', 'pretty']);
+  oneOf('LOG_FORMAT', Object.values(LogFormat));
   oneOf('LOG_LEVEL', LOG_LEVELS);
 
   const config: AppConfig = {
@@ -215,12 +223,16 @@ export function loadConfig(
       prefix: env.QUEUE_PREFIX ?? 'geofence',
       // Önceki 2 worker × 32 eşzamanlı iş ile aynı paralellik.
       lanes: int('QUEUE_LANES', 64, 1, 1024),
+      keepCompleted: int('QUEUE_KEEP_COMPLETED', 1000, 0, 1_000_000),
+      keepFailed: int('QUEUE_KEEP_FAILED', 5000, 0, 1_000_000),
     },
     worker: {
       // Çöken worker'ın işi en geç ~30 sn içinde başka worker'a geçer:
       // kilit 20 sn içinde düşer, 5 sn'lik iki aramada bulunur.
       lockMs: int('WORKER_LOCK_MS', 20_000, 1000, 600_000),
       stalledCheckMs: int('WORKER_STALLED_CHECK_MS', 5000, 100, 600_000),
+      pointAttempts: int('WORKER_POINT_ATTEMPTS', 3, 1, 20),
+      retryBaseDelayMs: int('WORKER_RETRY_DELAY_MS', 200, 0, 60_000),
     },
     realtime: {
       enabled: env.REALTIME_ENABLED !== 'false',

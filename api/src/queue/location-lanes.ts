@@ -16,25 +16,25 @@ import {
   type LocationJobData,
 } from './location-job.js';
 
-/** İncelemek için Redis'te tutulan en fazla iş: tüm şeritlerin toplamı. */
-export const KEEP_COMPLETED = 1000;
-export const KEEP_FAILED = 5000;
-
 /**
- * Kuyruğa eklenen işlerin ayarları. Tutma sınırları kuyruk başınadır; şeritlere bölünür,
- * yoksa 64 şerit Redis'te 64 kat iş biriktirirdi.
+ * Kuyruğa eklenen işlerin ayarları. Tutma sınırları (QUEUE_KEEP_COMPLETED / _FAILED) tüm
+ * şeritlerin toplamıdır; BullMQ kuyruk başına uyguladığı için şeritlere bölünür, yoksa
+ * 64 şerit Redis'te 64 kat iş biriktirirdi.
  */
-export function laneJobOptions(queues: number) {
+export function laneJobOptions(
+  queues: number,
+  keep: Pick<AppConfig['queue'], 'keepCompleted' | 'keepFailed'>,
+) {
   return {
     // Yeniden deneme worker'ın içinde yapılır (LocationProcessor): BullMQ'nun kendi denemesi
     // işi şeridin sonuna atar ve aynı kullanıcının sonraki işi öne geçerdi.
     attempts: 1,
     // Tamamlanan işleri Redis'te biriktirme; yük altında belleği korur.
     removeOnComplete: {
-      count: Math.ceil(KEEP_COMPLETED / queues),
+      count: Math.ceil(keep.keepCompleted / queues),
       age: 3600,
     },
-    removeOnFail: { count: Math.ceil(KEEP_FAILED / queues) },
+    removeOnFail: { count: Math.ceil(keep.keepFailed / queues) },
   };
 }
 
@@ -95,7 +95,7 @@ export class LocationLanes
     const options = {
       connection: this.connection,
       prefix: config.queue.prefix,
-      defaultJobOptions: laneJobOptions(this.count),
+      defaultJobOptions: laneJobOptions(this.count, config.queue),
     };
     this.lanes = Array.from(
       { length: this.count },

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { AreaEvent, AreaRef, Position } from '@shared/api/types';
+import { SocketEvent } from '@shared/realtime/events';
 import { getSocket } from '@shared/realtime/socket';
 import { PLATE_MS } from '../config';
 import type { PlateItem } from './SignPlate';
@@ -16,7 +17,7 @@ export function useRiderEvents(scooterId: string) {
 
   useEffect(() => {
     const socket = getSocket();
-    const join = () => socket.emit('subscribe', { userId: scooterId });
+    const join = () => socket.emit(SocketEvent.SUBSCRIBE, { userId: scooterId });
     const onEvent = (event: AreaEvent) => {
       if (event.userId !== scooterId) return;
       const plate: PlateItem = {
@@ -32,14 +33,14 @@ export function useRiderEvents(scooterId: string) {
       if (p.userId === scooterId) setCurrentAreas(p.areas);
     };
     join();
-    socket.on('connect', join);
-    socket.on('area-event', onEvent);
-    socket.on('position', onPosition);
+    socket.on(SocketEvent.CONNECT, join);
+    socket.on(SocketEvent.AREA_EVENT, onEvent);
+    socket.on(SocketEvent.POSITION, onPosition);
     return () => {
-      socket.off('connect', join);
-      socket.off('area-event', onEvent);
-      socket.off('position', onPosition);
-      socket.emit('unsubscribe', { userId: scooterId });
+      socket.off(SocketEvent.CONNECT, join);
+      socket.off(SocketEvent.AREA_EVENT, onEvent);
+      socket.off(SocketEvent.POSITION, onPosition);
+      socket.emit(SocketEvent.UNSUBSCRIBE, { userId: scooterId });
     };
   }, [scooterId, dismiss]);
 

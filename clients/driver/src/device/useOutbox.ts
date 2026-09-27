@@ -1,13 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, ApiError } from '@shared/api/client';
 import type { LocationPoint } from '@shared/api/types';
+import {
+  DEVICE_LOG_SIZE,
+  NETWORK_RETRY_MS,
+  OUTBOX_MAX_BATCH as MAX_BATCH,
+  OUTBOX_MAX_QUEUE as MAX_QUEUE,
+} from '../config';
 
-const MAX_BATCH = 100;
-/** Çok uzun kopukluklarda belleği korumak için en eski noktalar atılır. */
-const MAX_QUEUE = 2000;
-const NETWORK_RETRY_MS = 5000;
-
-export type LogKind = 'sent' | 'queued' | 'wait' | 'error';
+/** Cihaz günlüğü satırının türü (CSS'te device-log__item--<tür>). */
+export const LogKind = { SENT: 'sent', QUEUED: 'queued', WAIT: 'wait', ERROR: 'error' } as const;
+export type LogKind = (typeof LogKind)[keyof typeof LogKind];
 
 export interface DeviceLogEntry {
   id: number;
@@ -44,7 +47,7 @@ export function useOutbox(online: boolean) {
 
   const addLog = useCallback((kind: LogKind, text: string, requestId?: string | null) => {
     const entry = { id: nextLogId.current++, at: new Date(), kind, text, requestId };
-    setLog((list) => [entry, ...list].slice(0, 40));
+    setLog((list) => [entry, ...list].slice(0, DEVICE_LOG_SIZE));
   }, []);
 
   /** Kaydedilen konum saniyelik zamanlayıcıyı beklemeden gönderilsin diye flush'a erişim. */
@@ -55,7 +58,7 @@ export function useOutbox(online: boolean) {
       queue.current.push(point);
       if (queue.current.length > MAX_QUEUE) queue.current.splice(0, queue.current.length - MAX_QUEUE);
       setPending(queue.current.length);
-      if (!online) addLog('queued', `Çevrimdışı: konum sıraya alındı (${queue.current.length} bekliyor)`);
+      if (!online) addLog(LogKind.QUEUED, `Çevrimdışı: konum sıraya alındı (${queue.current.length} bekliyor)`);
       flushNow.current();
     },
     [online, addLog],
@@ -81,7 +84,7 @@ export function useOutbox(online: boolean) {
       batchLimit.current = probing.current ? MAX_BATCH : Math.min(MAX_BATCH, batchLimit.current * 2);
       probing.current = false;
       addLog(
-        'sent',
+        LogKind.SENT,
         batch.length === 1 ? 'Konum gönderildi' : `Biriken ${batch.length} konum toplu gönderildi`,
         requestId,
       );
@@ -91,7 +94,7 @@ export function useOutbox(online: boolean) {
         const wait = e.retryAfterSeconds ?? 5;
         retryAt.current = Date.now() + wait * 1000;
         addLog(
-          'wait',
+          LogKind.WAIT,
           `${e.status === 429 ? 'Gönderim sınırı aşıldı' : 'Sunucu yoğun'}, ${wait} sn sonra tekrar denenecek (${e.status})`,
           e.requestId,
         );
@@ -100,7 +103,7 @@ export function useOutbox(online: boolean) {
         // grubu ikiye bölüp tekrar dene, sağlam noktalar kaybolmasın.
         batchLimit.current = Math.ceil(batch.length / 2);
         addLog(
-          'error',
+          LogKind.ERROR,
           `Toplu gönderim reddedildi, ${batchLimit.current}'lik gruplarla denenecek: ${e.message} (400)`,
           e.requestId,
         );
@@ -109,13 +112,13 @@ export function useOutbox(online: boolean) {
         remove(batch);
         batchLimit.current = 1;
         probing.current = true;
-        addLog('error', `Sunucu konumu reddetti: ${e.message} (400)`, e.requestId);
+        addLog(LogKind.ERROR, `Sunucu konumu reddetti: ${e.message} (400)`, e.requestId);
       } else if (e.status === 401 || e.status === 403) {
         // Anahtar sorunu: tekrar göndermek düzeltmez ama ayar düzelince gidebilsin diye noktalar tutulur.
         // Yerel geliştirmede en sık sebep, sürücü anahtarının API'de tanımlı olmaması.
         retryAt.current = Date.now() + NETWORK_RETRY_MS;
         addLog(
-          'error',
+          LogKind.ERROR,
           e.status === 401
             ? 'Sunucu sürücü anahtarını tanımadı (401). Yerel geliştirmede api/.env içinde INGEST_API_KEYS=dev-driver-key olmalı'
             : 'Sürücü anahtarının bu işlem için yetkisi yok (403)',
@@ -124,7 +127,7 @@ export function useOutbox(online: boolean) {
       } else {
         retryAt.current = Date.now() + NETWORK_RETRY_MS;
         addLog(
-          'wait',
+          LogKind.WAIT,
           `${e.status ? `Sunucu hatası (${e.status})` : 'Sunucuya ulaşılamadı'}, 5 sn sonra tekrar denenecek`,
           e.requestId,
         );
@@ -142,7 +145,7 @@ export function useOutbox(online: boolean) {
   useEffect(() => {
     if (online && queue.current.length > 0) {
       retryAt.current = 0;
-      addLog('sent', `Bağlantı geldi, ${queue.current.length} konum gönderiliyor`);
+      addLog(LogKind.SENT, `Bağlantı geldi, ${queue.current.length} konum gönderiliyor`);
     }
     const timer = setInterval(() => void flush(), 1000);
     void flush();

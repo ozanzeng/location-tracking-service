@@ -11,6 +11,7 @@ import { Reflector } from '@nestjs/core';
 import type { Request } from 'express';
 import { APP_CONFIG, type AppConfig } from '../config/configuration.js';
 import { INGEST_ALLOWED } from './ingest-allowed.decorator.js';
+import { KeyScope } from './key-scope.enum.js';
 import { IS_PUBLIC } from './public.decorator.js';
 
 export const API_KEY_HEADER = 'x-api-key';
@@ -29,21 +30,18 @@ export function isValidApiKey(keys: string[], provided: unknown): boolean {
   });
 }
 
-/** full: her şey; ingest: sadece konum gönderme (bkz. AppConfig.security.ingestApiKeys). */
-export type KeyScope = 'full' | 'ingest';
-
 /** Anahtarın yetkisi; geçersizse null. Anahtar tanımlı değilse doğrulama kapalıdır. */
 export function apiKeyScope(
   security: AppConfig['security'],
   provided: unknown,
 ): KeyScope | null {
-  if (security.apiKeys.length === 0) return 'full';
-  if (isValidApiKey(security.apiKeys, provided)) return 'full';
+  if (security.apiKeys.length === 0) return KeyScope.FULL;
+  if (isValidApiKey(security.apiKeys, provided)) return KeyScope.FULL;
   if (
     security.ingestApiKeys.length > 0 &&
     isValidApiKey(security.ingestApiKeys, provided)
   ) {
-    return 'ingest';
+    return KeyScope.INGEST;
   }
   return null;
 }
@@ -78,8 +76,8 @@ export class ApiKeyGuard implements CanActivate {
       .getRequest<Request>()
       .header(API_KEY_HEADER);
     const scope = apiKeyScope(this.security, provided);
-    if (scope === 'full') return true;
-    if (scope === 'ingest') {
+    if (scope === KeyScope.FULL) return true;
+    if (scope === KeyScope.INGEST) {
       if (this.reflector.getAllAndOverride<boolean>(INGEST_ALLOWED, targets)) {
         return true;
       }

@@ -1,9 +1,7 @@
 import { plainToInstance } from 'class-transformer';
 import { validateSync } from 'class-validator';
-import {
-  CreateLocationBatchDto,
-  MAX_BATCH_SIZE,
-} from './create-location-batch.dto.js';
+import { MAX_BATCH_SIZE } from '../../config/limits.js';
+import { CreateLocationBatchDto } from './create-location-batch.dto.js';
 
 const location = {
   userId: 'u',

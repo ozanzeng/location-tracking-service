@@ -1,11 +1,10 @@
 import { useEffect, useState } from 'react';
 import { api } from '@shared/api/client';
 import type { AreaEvent } from '@shared/api/types';
+import { SocketEvent } from '@shared/realtime/events';
 import { getSocket } from '@shared/realtime/socket';
+import { FEED_HISTORY_SIZE as HISTORY_SIZE, FEED_LIMIT } from '../config';
 import { logsToFeed, mergeFeed, type FeedItem } from './logsToFeed';
-
-const FEED_LIMIT = 60;
-const HISTORY_SIZE = 40;
 
 /** Giriş/çıkış akışı: açılışta son kayıtlar, ardından canlı olaylar. */
 export function useEventFeed() {
@@ -32,10 +31,10 @@ export function useEventFeed() {
       };
       setFeed((list) => [item, ...list].slice(0, FEED_LIMIT));
     };
-    socket.on('area-event', onEvent);
+    socket.on(SocketEvent.AREA_EVENT, onEvent);
     return () => {
       cancelled = true;
-      socket.off('area-event', onEvent);
+      socket.off(SocketEvent.AREA_EVENT, onEvent);
     };
   }, []);
 

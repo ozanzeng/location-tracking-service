@@ -1,9 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { Injectable, Logger, type NestMiddleware } from '@nestjs/common';
 import type { NextFunction, Request, Response } from 'express';
+import { REQUEST_ID_PATTERN as REQUEST_ID } from '../../config/limits.js';
 import { httpRequestDuration } from '../../metrics/metrics.js';
-
-const REQUEST_ID = /^[A-Za-z0-9._-]{1,128}$/;
 
 declare module 'express' {
   interface Request {

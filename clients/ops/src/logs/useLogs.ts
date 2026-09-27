@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '@shared/api/client';
-import type { AreaEvent, LogEntry } from '@shared/api/types';
+import { EventType, type AreaEvent, type LogEntry } from '@shared/api/types';
+import { SocketEvent } from '@shared/realtime/events';
 import { getSocket } from '@shared/realtime/socket';
 import { toLogQuery, type LogFilters } from './logFilters';
 
@@ -42,17 +43,17 @@ export function useLogs(filters: LogFilters) {
 
   useEffect(() => {
     const socket = getSocket();
-    const join = () => socket.emit('subscribe', { monitor: true });
+    const join = () => socket.emit(SocketEvent.SUBSCRIBE, { monitor: true });
     const onEvent = (e: AreaEvent) => {
-      if (e.eventType === 'ENTER') setNewEntries((n) => n + 1);
+      if (e.eventType === EventType.ENTER) setNewEntries((n) => n + 1);
     };
     join();
-    socket.on('connect', join);
-    socket.on('area-event', onEvent);
+    socket.on(SocketEvent.CONNECT, join);
+    socket.on(SocketEvent.AREA_EVENT, onEvent);
     return () => {
-      socket.off('connect', join);
-      socket.off('area-event', onEvent);
-      socket.emit('unsubscribe', { monitor: true });
+      socket.off(SocketEvent.CONNECT, join);
+      socket.off(SocketEvent.AREA_EVENT, onEvent);
+      socket.emit(SocketEvent.UNSUBSCRIBE, { monitor: true });
     };
   }, []);
 

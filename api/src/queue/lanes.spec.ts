@@ -1,9 +1,5 @@
 import { laneOf, laneQueueName } from './lanes.js';
-import {
-  KEEP_COMPLETED,
-  KEEP_FAILED,
-  laneJobOptions,
-} from './location-lanes.js';
+import { laneJobOptions } from './location-lanes.js';
 
 describe('laneOf', () => {
   it('aynı kullanıcı her zaman aynı şeride düşer', () => {
@@ -42,20 +38,22 @@ describe('laneOf', () => {
 });
 
 describe('laneJobOptions', () => {
+  const keep = { keepCompleted: 1000, keepFailed: 5000 };
+
   it("Redis'te tutulan iş sayısı şerit sayısından bağımsız olarak toplamda aynı kalır", () => {
     for (const lanes of [1, 7, 64, 1024]) {
-      const { removeOnComplete, removeOnFail } = laneJobOptions(lanes);
+      const { removeOnComplete, removeOnFail } = laneJobOptions(lanes, keep);
       const completed = removeOnComplete.count * lanes;
       const failed = removeOnFail.count * lanes;
       // Yuvarlama yüzünden şerit başına en fazla 1 fazla.
-      expect(completed).toBeGreaterThanOrEqual(KEEP_COMPLETED);
-      expect(completed).toBeLessThan(KEEP_COMPLETED + lanes);
-      expect(failed).toBeGreaterThanOrEqual(KEEP_FAILED);
-      expect(failed).toBeLessThan(KEEP_FAILED + lanes);
+      expect(completed).toBeGreaterThanOrEqual(keep.keepCompleted);
+      expect(completed).toBeLessThan(keep.keepCompleted + lanes);
+      expect(failed).toBeGreaterThanOrEqual(keep.keepFailed);
+      expect(failed).toBeLessThan(keep.keepFailed + lanes);
     }
   });
 
   it('BullMQ yeniden denemesi kapalı (deneme işin içinde, sıra bozulmasın)', () => {
-    expect(laneJobOptions(64).attempts).toBe(1);
+    expect(laneJobOptions(64, keep).attempts).toBe(1);
   });
 });

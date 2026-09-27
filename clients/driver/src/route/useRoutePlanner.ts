@@ -11,9 +11,12 @@ interface Route {
   legs: LatLng[][];
 }
 
+export const NoticeKind = { INFO: 'info', ERROR: 'error' } as const;
+export type NoticeKind = (typeof NoticeKind)[keyof typeof NoticeKind];
+
 export interface RouteNotice {
   text: string;
-  kind: 'info' | 'error';
+  kind: NoticeKind;
 }
 
 /**
@@ -49,12 +52,14 @@ export function useRoutePlanner(roads: RoadNetwork | null, restrictions: Restric
     if (!leg) {
       setNotice({
         text: 'Bu noktaya sürüş yasak bölgelere girmeden ulaşılamıyor; başka bir yol seçin.',
-        kind: 'error',
+        kind: NoticeKind.ERROR,
       });
       return;
     }
     setNotice(
-      zone >= 0 ? { text: 'Sürüş yasak bölgeye girilemez; durak bölgenin sınırına kondu.', kind: 'info' } : null,
+      zone >= 0
+        ? { text: 'Sürüş yasak bölgeye girilemez; durak bölgenin sınırına kondu.', kind: NoticeKind.INFO }
+        : null,
     );
     setRoute({
       start,
@@ -76,7 +81,7 @@ export function useRoutePlanner(roads: RoadNetwork | null, restrictions: Restric
     for (const stop of stops) {
       const leg = roads.route(from, stop, restrictions ?? undefined);
       if (!leg) {
-        setNotice({ text: 'Durak silinince rota kurulamıyor; önce başka bir durağı silin.', kind: 'error' });
+        setNotice({ text: 'Durak silinince rota kurulamıyor; önce başka bir durağı silin.', kind: NoticeKind.ERROR });
         return;
       }
       legs.push(leg);

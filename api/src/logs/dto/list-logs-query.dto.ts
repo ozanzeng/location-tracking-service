@@ -11,12 +11,17 @@ import {
   MaxLength,
   Min,
 } from 'class-validator';
+import {
+  LOGS_PAGE_DEFAULT,
+  LOGS_PAGE_MAX,
+  USER_ID_MAX_LENGTH,
+} from '../../config/limits.js';
 
 export class ListLogsQueryDto {
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
-  @MaxLength(64)
+  @MaxLength(USER_ID_MAX_LENGTH)
   userId?: string;
 
   @ApiPropertyOptional({ format: 'uuid' })
@@ -49,13 +54,18 @@ export class ListLogsQueryDto {
   @IsISO8601()
   to?: string;
 
-  @ApiPropertyOptional({ default: 50, minimum: 1, maximum: 500 })
+  @ApiPropertyOptional({
+    default: LOGS_PAGE_DEFAULT,
+    minimum: 1,
+    maximum: LOGS_PAGE_MAX,
+  })
   @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(1)
-  @Max(500)
-  limit = 50;
+  @Max(LOGS_PAGE_MAX)
+  // Tip açıkça yazılmalı: sabitten gelen değerde Swagger'a tip Object olarak gider.
+  limit: number = LOGS_PAGE_DEFAULT;
 
   @ApiPropertyOptional({ description: 'Önceki yanıttaki nextCursor' })
   @IsOptional()

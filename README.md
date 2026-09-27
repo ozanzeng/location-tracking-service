@@ -136,7 +136,7 @@ curl -H "$H" 'localhost:3000/logs?userId=scooter-1'
 
 **Ayarlar açılışta doğrulanır.** Ortam değişkenleri servis ayağa kalkmadan kontrol edilir. Verilmeyen değer için varsayılan kullanılır. Verilen ama geçersiz bir değer (ör. `DB_PORT=abc`, `REDIS_URL=http://...`, hatalı `CORS_ORIGINS`) sessizce varsayılana düşmez: servis bütün sorunları birlikte listeleyip 1 koduyla çıkar. Production'da API sunucusu `API_KEYS` olmadan ve 16 karakterden kısa bir anahtarla açılmaz. Worker, migration ve smoke betikleri anahtar kullanmadığı için bu kural onlara uygulanmaz.
 
-**Kuyruk ayarları.** Tamamlanan işler Redis'te birikmez: incelemek için tamamlananların son ~1.000'i, başarısızların son ~5.000'i tutulur. BullMQ bu sınırları kuyruk başına uyguladığı için şeritlere bölünür; bölünmeseydi 64 şerit 64 kat iş biriktirirdi (yük testinden sonra 64 bin iş, 84 MB). Yeniden deneme ve eşzamanlılık şerit tasarımının parçası (aşağıda).
+**Kuyruk ayarları.** Tamamlanan işler Redis'te birikmez: incelemek için tamamlananların son ~1.000'i, başarısızların son ~5.000'i tutulur (`QUEUE_KEEP_COMPLETED`, `QUEUE_KEEP_FAILED`). BullMQ bu sınırları kuyruk başına uyguladığı için şeritlere bölünür; bölünmeseydi 64 şerit 64 kat iş biriktirirdi (yük testinden sonra 64 bin iş, 84 MB). Yeniden deneme ve eşzamanlılık şerit tasarımının parçası (aşağıda).
 
 **Toplu istekte sıra korunur.** Toplu istekteki konumlar kullanıcı başına tek işte, zamana göre sıralı tutulur ve worker bunları sırayla işler. Ayrı işler olsalardı paralel worker'lar yeni noktayı eskiden önce işleyebilirdi. O zaman eski nokta "geç gelmiş" sayılıp atlanır ve bir alan girişi kaçabilirdi; e2e testi bu durumu ters sırada gönderilen noktalarla doğruluyor.
 
@@ -146,7 +146,7 @@ curl -H "$H" 'localhost:3000/logs?userId=scooter-1'
 - Şeritte aynı anda tek iş çalışır. Bu sınır BullMQ'nun kuyruk düzeyindeki global concurrency ayarıyla Redis'te uygulanır; worker süreci sayısından bağımsızdır.
 - Farklı şeritler paralel ilerler: aynı anda en fazla 64 iş işlenir, önceki 2 worker × 32 ayarıyla aynı paralellik.
 - Bedeli: yavaş bir iş aynı şeritteki diğer kullanıcıları (yaklaşık 1/64'ünü) bekletir. En dolu şeridin derinliği ayrı bir metrik olarak yayınlanır (`location_lane_backlog_max`).
-- Yeniden deneme işin içinde yapılır: nokta başına 3 deneme, aralarında 200 ve 400 ms. BullMQ'nun kendi yeniden denemesi işi şeridin sonuna atar ve sonraki iş öne geçerdi. Denemeleri tükenen iş başarısız sayılır, şerit hemen sıradaki işle devam eder.
+- Yeniden deneme işin içinde yapılır: nokta başına 3 deneme, aralarında 200 ve 400 ms (`WORKER_POINT_ATTEMPTS`, `WORKER_RETRY_DELAY_MS`). BullMQ'nun kendi yeniden denemesi işi şeridin sonuna atar ve sonraki iş öne geçerdi. Denemeleri tükenen iş başarısız sayılır, şerit hemen sıradaki işle devam eder.
 - Şerit sayısı API ve worker'da aynı olmalı. İlk açılan süreç sayıyı Redis'e yazar (`<önek>:lanes`); farklı sayıyla açılan worker açılmayı reddeder, API hatayı loglar. Değiştirmek için API durdurulur, kuyruk boşalınca bu anahtar silinir ve tüm süreçler yeni değerle açılır.
 - Şeritlerden önceki tek kuyrukta güncelleme sırasında kalmış işler de worker tarafından işlenir.
 
@@ -263,7 +263,7 @@ docker compose up -d --build
 
 | | Birim | E2E | Smoke (veri yazmaz*) |
 |---|---|---|---|
-| **Backend** | 111 test · `api: npm test` | 60 test · `api: npm run test:e2e` | `api: npm run smoke` |
+| **Backend** | 113 test · `api: npm test` | 61 test · `api: npm run test:e2e` | `api: npm run smoke` |
 | **Veritabanı** | 19 test · `api: npm run test:db` | (backend e2e içinde) | `api: npm run smoke:db` |
 | **Frontend** | 74 test · `clients: npm run test:unit` | 18 tarayıcı testi · `clients: npm run test:ui` | `clients: npm run smoke` |
 
@@ -380,6 +380,15 @@ npm run dev:driver                # sürücü :5174
 
 Geliştirme proxy'si sürücü uygulaması için `dev-driver-key`, operasyon için `dev-api-key` gönderir; ikisi de `api/.env` içinde tanımlı olmalı (`API_KEYS`, `INGEST_API_KEYS`). Eski bir `.env`'de sürücü anahtarı yoksa API açılışta bunu uyarır, sürücü uygulamasının cihaz günlüğü de `401`'de ne ekleneceğini gösterir.
 
+## Ayarlar, sınırlar ve enum'lar
+
+Değerler elle yazılmaz; her biri tek bir yerde tanımlıdır ve kod oradan okur:
+
+- **Ortama göre değişenler: `api/src/config/configuration.ts`.** Veritabanı, Redis, şerit sayısı, yeniden deneme, kilit süreleri, rate limit, CORS, ping aralığı gibi değerler env ile verilir. Servis açılırken hepsi doğrulanır; geçersiz değer varsayılana düşmez (bkz. "Ayarlar açılışta doğrulanır"). Liste ve varsayılanlar: `api/.env.example`.
+- **API sözleşmesinin sınırları: `api/src/config/limits.ts`.** `userId` biçimi ve uzunluğu, toplu istekteki en fazla konum, saat farkı payı, sayfa boyutları, alan adı uzunluğu, polygon köşe sınırı. Bunlar istemcilerin gördüğü davranışı belirlediği için env ile değil, kodda ve tek yerde durur; DTO doğrulamaları ve Swagger belgesi de buradan okur.
+- **Enum'lar:** alan tipi, giriş/çıkış, anahtar yetkisi, işleme sonucu, ret sebebi (metrik etiketi), health durumları, Socket.IO olay adları, log biçimi ve ortam. API'de her biri kendi özelliğinin yanında bir `*.enum.ts` dosyasındadır. İstemcilerde karşılıkları `clients/shared/src/api/types.ts` ve `clients/shared/src/realtime/events.ts` içinde `as const` nesneleridir: kullanımı enum gibidir (`AreaType.PARKING`), tipi API'den gelen JSON değerleriyle doğrudan uyumludur. İki taraftaki tanımlar aynı değerleri taşır; biri değişirse diğeri de değişmeli.
+- **İstemci ayarları:** `clients/driver/src/config.ts` (5 sn ölçüm, gönderim kuyruğu sınırları, levha süresi, yol yapışma mesafeleri) ve `clients/ops/src/config.ts` (canlı haritada aktiflik süreleri, olay akışı ve sayfa boyutları, durum yenileme aralığı).
+
 ## Proje yapısı
 
 ```
@@ -394,7 +403,7 @@ api/src/
   security/     API anahtarı guard'ı (tam / sadece konum yetkisi), Swagger dekoratörü, kullanıcı başına rate limit
   metrics/      Prometheus metrik tanımları ve /metrics
   health/       /health
-  config/       doğrulanan ayarlar (ConfigError), CORS, logger, .env yükleme
+  config/       doğrulanan ayarlar (ConfigError), API sınırları (limits.ts), ortam/log enum'ları, CORS, logger, .env yükleme
   common/       http/ (istek kimliği, erişim logu, Retry-After), redis/ (bağlantı)
   database/     TypeORM ayarları, migration, migrate scripti
 api/test/       e2e testleri

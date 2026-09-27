@@ -13,11 +13,9 @@ import {
 } from '@nestjs/websockets';
 import type { Server, Socket } from 'socket.io';
 import { APP_CONFIG, type AppConfig } from '../config/configuration.js';
-import {
-  API_KEY_HEADER,
-  apiKeyScope,
-  type KeyScope,
-} from '../security/api-key.guard.js';
+import { USER_ID_MAX_LENGTH } from '../config/limits.js';
+import { API_KEY_HEADER, apiKeyScope } from '../security/api-key.guard.js';
+import { KeyScope } from '../security/key-scope.enum.js';
 import { PositionBuffer } from './position-buffer.js';
 import {
   isUserRoom,
@@ -25,6 +23,7 @@ import {
   userRoom,
   type GeofenceUpdateMessage,
 } from './realtime.constants.js';
+import { RealtimeEvent } from './realtime-event.enum.js';
 import { RealtimeSubscriber } from './realtime.subscriber.js';
 
 interface SubscribePayload {
@@ -57,7 +56,7 @@ export class RealtimeGateway
     this.subscriber.onUpdate((message) => this.onUpdate(message));
     // Alan listesi herkese açık bilgi; tüm bağlı istemcilere iletilir.
     this.subscriber.onAreasChanged((message) =>
-      this.server.emit('areas-changed', message),
+      this.server.emit(RealtimeEvent.AREAS_CHANGED, message),
     );
     this.flushTimer = setInterval(
       () => this.flushPositions(),
@@ -81,27 +80,30 @@ export class RealtimeGateway
     (client.data as { scope?: KeyScope }).scope = scope;
   }
 
-  @SubscribeMessage('subscribe')
+  @SubscribeMessage(RealtimeEvent.SUBSCRIBE)
   handleSubscribe(
     @ConnectedSocket() client: Socket,
     @MessageBody() payload: SubscribePayload,
   ) {
     // Tüm filonun canlı yayını tam yetki ister; sürücü anahtarı sadece kullanıcı odasına girer.
     const scope = (client.data as { scope?: KeyScope }).scope;
-    if (payload?.monitor && scope !== 'full') {
+    if (payload?.monitor && scope !== KeyScope.FULL) {
       return {
         ok: false,
         error: 'monitor aboneliği tam yetkili anahtar ister',
       };
     }
     if (payload?.monitor) void client.join(MONITOR_ROOM);
-    if (typeof payload?.userId === 'string' && payload.userId.length <= 64) {
+    if (
+      typeof payload?.userId === 'string' &&
+      payload.userId.length <= USER_ID_MAX_LENGTH
+    ) {
       const room = userRoom(payload.userId);
       // Sürücü anahtarıyla açılan bağlantı aynı anda tek kullanıcı odasında durur: yeni
       // kullanıcıya abone olunca öncekinden çıkar. Tek bağlantıyla tüm filo dinlenemez.
       // Birden çok bağlantı açan biri yine başka kullanıcıları dinleyebilir; bunun çözümü
       // userId'nin imzalı token'dan alınmasıdır (README, kapsam dışı).
-      if (scope === 'ingest') {
+      if (scope === KeyScope.INGEST) {
         for (const joined of client.rooms) {
           if (isUserRoom(joined) && joined !== room) void client.leave(joined);
         }
@@ -111,7 +113,7 @@ export class RealtimeGateway
     return { ok: true };
   }
 
-  @SubscribeMessage('unsubscribe')
+  @SubscribeMessage(RealtimeEvent.UNSUBSCRIBE)
   handleUnsubscribe(
     @ConnectedSocket() client: Socket,
     @MessageBody() payload: SubscribePayload,
@@ -128,16 +130,18 @@ export class RealtimeGateway
     for (const event of message.events) {
       this.server
         .to([MONITOR_ROOM, userRoom(event.userId)])
-        .emit('area-event', event);
+        .emit(RealtimeEvent.AREA_EVENT, event);
     }
   }
 
   private flushPositions(): void {
     const batch = this.positions.drain();
     if (batch.length === 0) return;
-    this.server.to(MONITOR_ROOM).emit('positions', batch);
+    this.server.to(MONITOR_ROOM).emit(RealtimeEvent.POSITIONS, batch);
     for (const position of batch) {
-      this.server.to(userRoom(position.userId)).emit('position', position);
+      this.server
+        .to(userRoom(position.userId))
+        .emit(RealtimeEvent.POSITION, position);
     }
   }
 }

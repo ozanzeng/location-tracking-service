@@ -8,9 +8,9 @@ import type { Redis } from 'ioredis';
 import { APP_CONFIG, type AppConfig } from '../config/configuration.js';
 import { createRedis } from '../common/redis/create-redis.js';
 import { RetryableHttpException } from '../common/http/retryable.exception.js';
+import { RATE_LIMIT_WINDOW_SECONDS as WINDOW_SECONDS } from '../config/limits.js';
 import { locationsRejected } from '../metrics/metrics.js';
-
-const WINDOW_SECONDS = 60;
+import { RejectionReason } from '../metrics/rejection-reason.enum.js';
 
 /**
  * Kontrol ve artırma tek adımda (atomik): önce bütün kullanıcıların sayacı okunur, biri
@@ -89,7 +89,7 @@ export class UserRateLimiter implements OnModuleDestroy {
     );
     if (exceeded.length > 0) {
       const total = [...countsByUser.values()].reduce((a, b) => a + b, 0);
-      locationsRejected.inc({ reason: 'rate_limited' }, total);
+      locationsRejected.inc({ reason: RejectionReason.RATE_LIMITED }, total);
       throw new RetryableHttpException(
         HttpStatus.TOO_MANY_REQUESTS,
         `Kullanıcı başına dakikada en fazla ${this.limit} konum gönderilebilir: ${exceeded.map((i) => users[i - 1]).join(', ')}`,

@@ -1,9 +1,9 @@
-import type { AreaType, LogEntry } from '@shared/api/types';
+import { EventType, type AreaType, type LogEntry } from '@shared/api/types';
 
 export interface FeedItem {
   key: string;
   userId: string;
-  eventType: 'ENTER' | 'EXIT';
+  eventType: EventType;
   areaName: string;
   areaType: AreaType;
   at: string;
@@ -17,10 +17,16 @@ export function logsToFeed(logs: LogEntry[]): FeedItem[] {
   return logs
     .flatMap((l) => {
       const base = { userId: l.userId, areaName: l.areaName, areaType: l.areaType };
-      const enter: FeedItem = { ...base, key: `${l.id}-ENTER`, eventType: 'ENTER', at: l.entryTime };
-      return l.exitTime
-        ? [{ ...base, key: `${l.id}-EXIT`, eventType: 'EXIT' as const, at: l.exitTime }, enter]
-        : [enter];
+      const enter: FeedItem = {
+        ...base,
+        key: `${l.id}-${EventType.ENTER}`,
+        eventType: EventType.ENTER,
+        at: l.entryTime,
+      };
+      const exit: FeedItem | null = l.exitTime
+        ? { ...base, key: `${l.id}-${EventType.EXIT}`, eventType: EventType.EXIT, at: l.exitTime }
+        : null;
+      return exit ? [exit, enter] : [enter];
     })
     .toSorted((a, b) => b.at.localeCompare(a.at));
 }

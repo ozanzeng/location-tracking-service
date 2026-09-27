@@ -3,17 +3,11 @@ import L from 'leaflet';
 import { useMap } from 'react-leaflet';
 import { api } from '@shared/api/client';
 import type { AreaType, Position } from '@shared/api/types';
+import { SocketEvent } from '@shared/realtime/events';
 import { getSocket } from '@shared/realtime/socket';
+import { SCOOTER_ACTIVE_MS as ACTIVE_MS, SCOOTER_IDLE_MS as IDLE_MS, SCOOTER_REFRESH_MS } from '../config';
 import { scooterColor } from './scooterColor';
 import { countScooters, type Counts } from './scooterCounts';
-
-/**
- * "Aktif" = son 60 saniyede konum göndermiş. Cihazlar 5 sn'de bir gönderir; 15 sn sessiz
- * kalan soluklaşır (sürüş bitmiş, sekme kapanmış ya da bağlantı kopmuş olabilir),
- * 60 sn'de listeden düşer.
- */
-export const IDLE_MS = 15_000;
-export const ACTIVE_MS = 60_000;
 
 export interface Scooter {
   marker: L.CircleMarker;
@@ -83,7 +77,7 @@ export function ScooterLayer({
     );
 
     const socket = getSocket();
-    const join = () => socket.emit('subscribe', { monitor: true });
+    const join = () => socket.emit(SocketEvent.SUBSCRIBE, { monitor: true });
     const onPositions = (batch: Position[]) => {
       for (const p of batch)
         upsert(
@@ -94,8 +88,8 @@ export function ScooterLayer({
         );
     };
     join();
-    socket.on('connect', join);
-    socket.on('positions', onPositions);
+    socket.on(SocketEvent.CONNECT, join);
+    socket.on(SocketEvent.POSITIONS, onPositions);
 
     // Saniyede bir: sessiz kalanları soluklaştır, aktifliğini yitirenleri kaldır, sayaçları güncelle.
     const timer = setInterval(() => {
@@ -110,14 +104,14 @@ export function ScooterLayer({
         }
       }
       publishCounts();
-    }, 1000);
+    }, SCOOTER_REFRESH_MS);
 
     return () => {
       cancelled = true;
       clearInterval(timer);
-      socket.off('connect', join);
-      socket.off('positions', onPositions);
-      socket.emit('unsubscribe', { monitor: true });
+      socket.off(SocketEvent.CONNECT, join);
+      socket.off(SocketEvent.POSITIONS, onPositions);
+      socket.emit(SocketEvent.UNSUBSCRIBE, { monitor: true });
       layer.remove();
       all.clear();
     };

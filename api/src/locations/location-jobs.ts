@@ -1,7 +1,5 @@
+import { MAX_CLOCK_SKEW_MS } from '../config/limits.js';
 import type { LocationJobData } from '../queue/location-job.js';
-
-/** Cihaz saatinin sunucudan ileride olmasına izin verilen pay. */
-export const MAX_CLOCK_SKEW_MS = 60_000;
 
 export interface IncomingLocation {
   userId: string;

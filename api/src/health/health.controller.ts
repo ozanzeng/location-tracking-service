@@ -4,6 +4,7 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import type { Response } from 'express';
 import { DataSource } from 'typeorm';
 import { LocationLanes } from '../queue/location-lanes.js';
+import { DependencyStatus, HealthStatus } from './health-status.enum.js';
 import { Public } from '../security/public.decorator.js';
 
 /** Redis düşükken BullMQ komutları yeniden bağlanmayı bekler; health asılı kalmasın. */
@@ -37,16 +38,22 @@ export class HealthController {
   async health(@Res({ passthrough: true }) res: Response) {
     const [database, queue] = await Promise.all([
       withTimeout(this.dataSource.query('SELECT 1')).then(
-        () => 'up' as const,
-        () => 'down' as const,
+        () => DependencyStatus.UP,
+        () => DependencyStatus.DOWN,
       ),
       // Sayımlar Redis'ten okunur (tüm şeritlerin toplamı); başarısızsa Redis erişilemez demektir.
       withTimeout(this.lanes.counts(...JOB_STATES)).catch(() => null),
     ]);
-    const redis = queue ? 'up' : 'down';
+    const redis = queue ? DependencyStatus.UP : DependencyStatus.DOWN;
 
-    const ok = database === 'up' && redis === 'up';
+    const ok =
+      database === DependencyStatus.UP && redis === DependencyStatus.UP;
     res.status(ok ? 200 : 503);
-    return { status: ok ? 'ok' : 'error', database, redis, queue };
+    return {
+      status: ok ? HealthStatus.OK : HealthStatus.ERROR,
+      database,
+      redis,
+      queue,
+    };
   }
 }

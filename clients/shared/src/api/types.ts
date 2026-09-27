@@ -1,7 +1,27 @@
 import type { Polygon } from 'geojson';
 
-export type AreaType = 'NO_RIDE' | 'SLOW' | 'NO_PARKING' | 'PARKING' | 'SERVICE';
-export type EventType = 'ENTER' | 'EXIT';
+/**
+ * API'nin enum'ları. `as const` nesnesi: kullanım enum gibidir (AreaType.PARKING), tip ise
+ * API'den JSON ile gelen metin değerleriyle doğrudan uyumludur. Karşılıkları api/src altındaki
+ * *.enum.ts dosyalarında; biri değişirse diğeri de değişmeli.
+ */
+export const AreaType = {
+  NO_RIDE: 'NO_RIDE',
+  SLOW: 'SLOW',
+  NO_PARKING: 'NO_PARKING',
+  PARKING: 'PARKING',
+  SERVICE: 'SERVICE',
+} as const;
+export type AreaType = (typeof AreaType)[keyof typeof AreaType];
+
+export const EventType = { ENTER: 'ENTER', EXIT: 'EXIT' } as const;
+export type EventType = (typeof EventType)[keyof typeof EventType];
+
+export const HealthStatus = { OK: 'ok', ERROR: 'error' } as const;
+export type HealthStatus = (typeof HealthStatus)[keyof typeof HealthStatus];
+
+export const DependencyStatus = { UP: 'up', DOWN: 'down' } as const;
+export type DependencyStatus = (typeof DependencyStatus)[keyof typeof DependencyStatus];
 
 export interface Area {
   id: string;
@@ -66,8 +86,8 @@ export interface LogQuery {
 }
 
 export interface Health {
-  status: 'ok' | 'error';
-  database: 'up' | 'down';
-  redis: 'up' | 'down';
+  status: HealthStatus;
+  database: DependencyStatus;
+  redis: DependencyStatus;
   queue: { waiting: number; active: number; delayed: number; failed: number } | null;
 }

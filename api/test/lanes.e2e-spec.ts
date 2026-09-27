@@ -52,7 +52,7 @@ describe('Kullanıcı şeritleri (gerçek Redis)', () => {
       ...base,
       queue: { ...base.queue, prefix: `geofence-lanes-${run}`, lanes: 4 },
       // Çöken worker senaryosu saniyeler içinde bitsin.
-      worker: { lockMs: 1000, stalledCheckMs: 200 },
+      worker: { ...base.worker, lockMs: 1000, stalledCheckMs: 200 },
     };
     lanes = new LocationLanes(config);
     await lanes.verifyLayout();

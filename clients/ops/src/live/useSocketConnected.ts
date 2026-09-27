@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { SocketEvent } from '@shared/realtime/events';
 import { getSocket } from '@shared/realtime/socket';
 
 /** Canlı yayın bağlantısının açık olup olmadığı. */
@@ -8,11 +9,11 @@ export function useSocketConnected(): boolean {
     const socket = getSocket();
     const onConnect = () => setConnected(true);
     const onDisconnect = () => setConnected(false);
-    socket.on('connect', onConnect);
-    socket.on('disconnect', onDisconnect);
+    socket.on(SocketEvent.CONNECT, onConnect);
+    socket.on(SocketEvent.DISCONNECT, onDisconnect);
     return () => {
-      socket.off('connect', onConnect);
-      socket.off('disconnect', onDisconnect);
+      socket.off(SocketEvent.CONNECT, onConnect);
+      socket.off(SocketEvent.DISCONNECT, onDisconnect);
     };
   }, []);
   return connected;

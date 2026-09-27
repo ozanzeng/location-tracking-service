@@ -5,6 +5,7 @@ import {
   Index,
   PrimaryGeneratedColumn,
 } from 'typeorm';
+import { AREA_NAME_MAX_LENGTH } from '../config/limits.js';
 import type { Polygon } from 'geojson';
 import { AreaType } from './area-type.enum.js';
 
@@ -13,7 +14,7 @@ export class Area {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Column({ type: 'varchar', length: 120 })
+  @Column({ type: 'varchar', length: AREA_NAME_MAX_LENGTH })
   name: string;
 
   @Column({ type: 'enum', enum: AreaType, enumName: 'area_type' })

@@ -1,5 +1,6 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import type { Job } from 'bullmq';
+import { APP_CONFIG, type AppConfig } from '../config/configuration.js';
 import {
   areaTransitions,
   jobDuration,
@@ -13,11 +14,7 @@ import type {
 } from '../queue/location-job.js';
 import { RealtimePublisher } from '../realtime/realtime.publisher.js';
 import { GeofenceService } from './geofence.service.js';
-
-/** Bir noktanın en fazla deneme sayısı. */
-export const POINT_ATTEMPTS = 3;
-/** Denemeler arası ilk bekleme; her denemede ikiye katlanır (200, 400 ms). */
-export const RETRY_BASE_DELAY_MS = 200;
+import { ProcessStatus } from './process-status.enum.js';
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -32,6 +29,7 @@ export class LocationProcessor {
   constructor(
     private readonly geofence: GeofenceService,
     private readonly publisher: RealtimePublisher,
+    @Inject(APP_CONFIG) private readonly config: AppConfig,
   ) {}
 
   async process(job: Job<LocationJobData | UserLocation>) {
@@ -54,7 +52,7 @@ export class LocationProcessor {
         }),
       );
       stopTimer({ result: result.status });
-      if (result.status === 'stale') continue;
+      if (result.status === ProcessStatus.STALE) continue;
 
       processed++;
       events += result.events.length;
@@ -70,7 +68,8 @@ export class LocationProcessor {
   }
 
   /**
-   * Geçici hatada (DB bağlantısı koptu, zaman aşımı) nokta birkaç kez yeniden denenir.
+   * Geçici hatada (DB bağlantısı koptu, zaman aşımı) nokta birkaç kez yeniden denenir
+   * (WORKER_POINT_ATTEMPTS; bekleme WORKER_RETRY_DELAY_MS'ten başlar, her denemede ikiye katlanır).
    * Deneme işin içinde yapılır: BullMQ'nun kendi denemesi işi şeridin sonuna atardı ve
    * aynı kullanıcının sonraki işi öne geçerdi. Nokta tek transaction'da işlendiği için
    * başarısız deneme yarım iş bırakmaz. Denemeler tükenirse iş başarısız olur ve şerit
@@ -80,11 +79,12 @@ export class LocationProcessor {
     job: Job<LocationJobData | UserLocation>,
     fn: () => Promise<T>,
   ): Promise<T> {
+    const { pointAttempts, retryBaseDelayMs } = this.config.worker;
     for (let attempt = 1; ; attempt++) {
       try {
         return await fn();
       } catch (err) {
-        if (attempt >= POINT_ATTEMPTS) throw err;
+        if (attempt >= pointAttempts) throw err;
         this.logger.warn({
           message: 'Konum işlenemedi, tekrar denenecek',
           jobId: job.id,
@@ -93,7 +93,7 @@ export class LocationProcessor {
           attempt,
           error: (err as Error).message,
         });
-        await sleep(RETRY_BASE_DELAY_MS * 2 ** (attempt - 1));
+        await sleep(retryBaseDelayMs * 2 ** (attempt - 1));
       }
     }
   }

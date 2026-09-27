@@ -4,6 +4,15 @@ import type { LatLng } from './geo/latlng';
 export const GPS_INTERVAL_MS = 5000;
 /** Bölge sınırında yapılan ek ölçümler arasında en az bu kadar süre olur (rate limit payı). */
 export const MIN_SAMPLE_GAP_MS = 1000;
+
+/** Bir toplu istekteki en fazla konum; API'deki MAX_BATCH_SIZE ile aynı olmalı. */
+export const OUTBOX_MAX_BATCH = 100;
+/** Çok uzun kopukluklarda belleği korumak için kuyrukta tutulan en fazla nokta; fazlası en eskiden atılır. */
+export const OUTBOX_MAX_QUEUE = 2000;
+/** Ağ hatası ya da anahtar sorunu sonrası tekrar deneme aralığı. */
+export const NETWORK_RETRY_MS = 5000;
+/** Cihaz günlüğünde gösterilen en fazla satır. */
+export const DEVICE_LOG_SIZE = 40;
 /** Rota oynatılırken konumun güncellenme aralığı. */
 export const PLAYBACK_TICK_MS = 500;
 /** Bölge bildiriminin (levhanın) ekranda kalma süresi. */

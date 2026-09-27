@@ -1,6 +1,10 @@
-import type { RouteNotice } from './useRoutePlanner';
+import { NoticeKind, type RouteNotice } from './useRoutePlanner';
 
-export type MoveMode = 'drag' | 'route';
+/** Scooter'ı hareket ettirme biçimi. */
+export const MoveMode = { DRAG: 'drag', ROUTE: 'route' } as const;
+export type MoveMode = (typeof MoveMode)[keyof typeof MoveMode];
+
+const MODE_LABELS: Record<MoveMode, string> = { [MoveMode.DRAG]: 'Sürükle', [MoveMode.ROUTE]: 'Rota çiz' };
 
 interface Props {
   mode: MoveMode;
@@ -26,7 +30,7 @@ export function MovementPanel(props: Props) {
         Hareket
       </span>
       <div className="segmented" role="radiogroup" aria-labelledby="mode-label">
-        {(['drag', 'route'] as const).map((m) => (
+        {Object.values(MoveMode).map((m) => (
           <button
             key={m}
             type="button"
@@ -35,11 +39,11 @@ export function MovementPanel(props: Props) {
             disabled={playing}
             onClick={() => onModeChange(m)}
           >
-            {m === 'drag' ? 'Sürükle' : 'Rota çiz'}
+            {MODE_LABELS[m]}
           </button>
         ))}
       </div>
-      {mode === 'drag' ? (
+      {mode === MoveMode.DRAG ? (
         <p className="hint">Scooter'ı haritada sürükleyin; yol üzerinde kalır.</p>
       ) : (
         <RouteControls {...props} hasRoute={stopCount > 0} />
@@ -70,7 +74,7 @@ function RouteControls({
             ? 'Haritada bir yola tıklayarak durak ekleyin. Rota yolları takip eder.'
             : (roadsError ?? 'Yol haritası yükleniyor')}
       </p>
-      {notice ? <p className={notice.kind === 'error' ? 'error' : 'notice'}>{notice.text}</p> : null}
+      {notice ? <p className={notice.kind === NoticeKind.ERROR ? 'error' : 'notice'}>{notice.text}</p> : null}
       <div className="row">
         <label htmlFor="speed" className="sr-only">
           Hız

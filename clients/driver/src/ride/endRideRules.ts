@@ -1,4 +1,4 @@
-import type { Area } from '@shared/api/types';
+import { AreaType, type Area } from '@shared/api/types';
 import type { LatLng } from '../geo/latlng';
 import { areaToZone, distanceToZone, pointInZone, zonesOfType } from '../geo/zone';
 
@@ -8,10 +8,10 @@ import { areaToZone, distanceToZone, pointInZone, zonesOfType } from '../geo/zon
  * Konum yerel alan geometrisiyle kontrol edilir, sunucuya sormaya gerek kalmaz.
  */
 export function endRideBlocker(here: LatLng, areas: Area[]): string | null {
-  if (zonesOfType(areas, 'NO_PARKING').some((z) => pointInZone(here, z))) {
+  if (zonesOfType(areas, AreaType.NO_PARKING).some((z) => pointInZone(here, z))) {
     return 'Park yasak bölgede sürüş bitirilemez. Bir park alanına gidin.';
   }
-  const parkings = areas.filter((a) => a.type === 'PARKING');
+  const parkings = areas.filter((a) => a.type === AreaType.PARKING);
   if (parkings.some((a) => pointInZone(here, areaToZone(a)))) return null;
 
   const nearest = parkings

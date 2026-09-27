@@ -3,8 +3,7 @@ import {
   type ValidationArguments,
   type ValidationOptions,
 } from 'class-validator';
-
-const MAX_VERTICES = 10_000;
+import { MAX_POLYGON_VERTICES as MAX_VERTICES } from '../config/limits.js';
 
 const isPosition = (p: unknown): p is [number, number] =>
   Array.isArray(p) &&

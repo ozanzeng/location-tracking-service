@@ -1,29 +1,35 @@
 import type { Job } from 'bullmq';
+import { AreaType } from '../areas/area-type.enum.js';
+import { type AppConfig, loadConfig } from '../config/configuration.js';
 import type { LocationJobData } from '../queue/location-job.js';
 import type { RealtimePublisher } from '../realtime/realtime.publisher.js';
 import type { GeofenceService } from './geofence.service.js';
+import { AreaEventType } from './area-event-type.enum.js';
 import type { ProcessResult } from './geofence.types.js';
 import { LocationProcessor } from './location.processor.js';
+import { ProcessStatus } from './process-status.enum.js';
+
+const base = loadConfig({});
 
 const processed = (recordedAt: string, events = 0): ProcessResult => ({
-  status: 'processed',
+  status: ProcessStatus.PROCESSED,
   events: Array.from({ length: events }, (_, i) => ({
     logId: String(i),
     userId: 'u1',
-    eventType: 'ENTER' as never,
-    area: { id: 'a', name: 'A', type: 'PARKING' as never },
+    eventType: AreaEventType.ENTER,
+    area: { id: 'a', name: 'A', type: AreaType.PARKING },
     occurredAt: recordedAt,
   })),
   position: { userId: 'u1', lat: 0, lng: 0, recordedAt, areas: [] },
 });
 
-const setup = () => {
+const setup = (worker: Partial<AppConfig['worker']> = {}) => {
   const order: string[] = [];
   const geofence = {
     process: vi.fn(async (p: { recordedAt: string }) => {
       order.push(p.recordedAt);
       return p.recordedAt === 't2'
-        ? ({ status: 'stale' } as const)
+        ? ({ status: ProcessStatus.STALE } as const)
         : processed(p.recordedAt, 1);
     }),
   };
@@ -31,6 +37,7 @@ const setup = () => {
   const processor = new LocationProcessor(
     geofence as unknown as GeofenceService,
     { publish } as unknown as RealtimePublisher,
+    { ...base, worker: { ...base.worker, ...worker } },
   );
   return { processor, geofence, publish, order };
 };
@@ -127,6 +134,26 @@ describe('LocationProcessor.process', () => {
 
     expect(geofence.process).toHaveBeenCalledTimes(3);
     expect(publish).not.toHaveBeenCalled();
+  });
+
+  it('deneme sayısını ve beklemeyi ayarlardan alır (WORKER_POINT_ATTEMPTS, WORKER_RETRY_DELAY_MS)', async () => {
+    vi.useFakeTimers();
+    const { processor, geofence } = setup({
+      pointAttempts: 2,
+      retryBaseDelayMs: 50,
+    });
+    geofence.process.mockRejectedValue(new Error('DB yok'));
+
+    const result = processor.process(
+      makeJob({ userId: 'u1', points: [points[0]] }),
+    );
+    const failed = expect(result).rejects.toThrow('DB yok');
+    await vi.advanceTimersByTimeAsync(49);
+    expect(geofence.process).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    await failed;
+    // İkinci deneme de başarısız: toplam 2 deneme, üçüncüsü yok.
+    expect(geofence.process).toHaveBeenCalledTimes(2);
   });
 
   it('eski biçimdeki tek konumlu işi (points yok) de işler', async () => {
