@@ -447,11 +447,17 @@ Bunlar production için sıradaki adımlar olur:
 
 ## Claude Code skill'leri
 
-Projeye şu skill'ler kuruldu (`.claude/skills/`, sürümler `skills-lock.json` içinde):
+Projeye şu skill'ler kuruldu (`.claude/skills/`, sürümler ve içerik özetleri `skills-lock.json` içinde):
 
-- `find-skills`: yeni ihtiyaçlar için skill aramak
+- `find-skills`: yeni ihtiyaçlar için skills.sh'de skill aramak. Aşağıdaki son dört skill bununla, projenin teknolojileri için arandı.
 - `frontend-design`: arayüzün görsel dili (trafik levhası teması, Overpass fontu)
 - `vercel-react-best-practices`: React tarafında performans kuralları (ref ile güncellenen harita katmanı, çizim aracının ayrı pakete bölünmesi, tek socket bağlantısı)
+- `supabase-postgres-best-practices`: Postgres şema, index, migration ve sorgu kuralları (Supabase'in bakımını yaptığı, her Postgres için)
+- `nestjs-best-practices`: NestJS modül, bağımlılık enjeksiyonu, güvenlik ve performans kuralları
+- `vitest`: backend ve frontend testlerinin çatısı Vitest için
+- `k6`: yük testi betikleri (`loadtest/`); betikleri tam yükle değil `k6 inspect` ile doğrular
+
+Skill'ler Claude'un bu projede tam yetkiyle izlediği talimatlardır. Kurulmadan önce kaynakları kontrol edildi: kurulum sayısı, depo yıldızı, resmi kaynak olup olmadığı ve içeriği (hepsi Markdown doküman; k6'da çalıştırılmayan örnek betikler var). `nestjs-best-practices` topluluk skill'idir; resmi bir NestJS skill'i bulunamadı.
 
 Yeni bir makinede aynı skill'leri kurmak için:
 
@@ -459,4 +465,8 @@ Yeni bir makinede aynı skill'leri kurmak için:
 npx skills add https://github.com/vercel-labs/skills --skill find-skills
 npx skills add https://github.com/anthropics/skills --skill frontend-design
 npx skills add https://github.com/vercel-labs/agent-skills --skill vercel-react-best-practices
+npx skills add https://github.com/supabase/agent-skills --skill supabase-postgres-best-practices
+npx skills add https://github.com/kadajett/agent-nestjs-skills --skill nestjs-best-practices
+npx skills add https://github.com/antfu/skills --skill vitest
+npx skills add https://github.com/grafana/skills --skill k6
 ```
