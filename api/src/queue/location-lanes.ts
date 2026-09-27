@@ -16,14 +16,27 @@ import {
   type LocationJobData,
 } from './location-job.js';
 
-const JOB_OPTIONS = {
-  // Yeniden deneme worker'ın içinde yapılır (LocationProcessor): BullMQ'nun kendi denemesi
-  // işi şeridin sonuna atar ve aynı kullanıcının sonraki işi öne geçerdi.
-  attempts: 1,
-  // Tamamlanan işleri Redis'te biriktirme; yük altında belleği korur.
-  removeOnComplete: { count: 1000, age: 3600 },
-  removeOnFail: { count: 5000 },
-};
+/** İncelemek için Redis'te tutulan en fazla iş: tüm şeritlerin toplamı. */
+export const KEEP_COMPLETED = 1000;
+export const KEEP_FAILED = 5000;
+
+/**
+ * Kuyruğa eklenen işlerin ayarları. Tutma sınırları kuyruk başınadır; şeritlere bölünür,
+ * yoksa 64 şerit Redis'te 64 kat iş biriktirirdi.
+ */
+export function laneJobOptions(queues: number) {
+  return {
+    // Yeniden deneme worker'ın içinde yapılır (LocationProcessor): BullMQ'nun kendi denemesi
+    // işi şeridin sonuna atar ve aynı kullanıcının sonraki işi öne geçerdi.
+    attempts: 1,
+    // Tamamlanan işleri Redis'te biriktirme; yük altında belleği korur.
+    removeOnComplete: {
+      count: Math.ceil(KEEP_COMPLETED / queues),
+      age: 3600,
+    },
+    removeOnFail: { count: Math.ceil(KEEP_FAILED / queues) },
+  };
+}
 
 /**
  * Kurulu şerit sayısını ilk açılan süreç yazar; sonrakiler aynı sayıyla açılmalı.
@@ -82,7 +95,7 @@ export class LocationLanes
     const options = {
       connection: this.connection,
       prefix: config.queue.prefix,
-      defaultJobOptions: JOB_OPTIONS,
+      defaultJobOptions: laneJobOptions(this.count),
     };
     this.lanes = Array.from(
       { length: this.count },

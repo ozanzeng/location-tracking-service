@@ -1,4 +1,9 @@
 import { laneOf, laneQueueName } from './lanes.js';
+import {
+  KEEP_COMPLETED,
+  KEEP_FAILED,
+  laneJobOptions,
+} from './location-lanes.js';
 
 describe('laneOf', () => {
   it('aynı kullanıcı her zaman aynı şeride düşer', () => {
@@ -33,5 +38,24 @@ describe('laneOf', () => {
 
   it('kuyruk adı BullMQ\'nun kabul ettiği biçimdedir (":" yok)', () => {
     expect(laneQueueName(12)).toBe('locations-12');
+  });
+});
+
+describe('laneJobOptions', () => {
+  it("Redis'te tutulan iş sayısı şerit sayısından bağımsız olarak toplamda aynı kalır", () => {
+    for (const lanes of [1, 7, 64, 1024]) {
+      const { removeOnComplete, removeOnFail } = laneJobOptions(lanes);
+      const completed = removeOnComplete.count * lanes;
+      const failed = removeOnFail.count * lanes;
+      // Yuvarlama yüzünden şerit başına en fazla 1 fazla.
+      expect(completed).toBeGreaterThanOrEqual(KEEP_COMPLETED);
+      expect(completed).toBeLessThan(KEEP_COMPLETED + lanes);
+      expect(failed).toBeGreaterThanOrEqual(KEEP_FAILED);
+      expect(failed).toBeLessThan(KEEP_FAILED + lanes);
+    }
+  });
+
+  it('BullMQ yeniden denemesi kapalı (deneme işin içinde, sıra bozulmasın)', () => {
+    expect(laneJobOptions(64).attempts).toBe(1);
   });
 });

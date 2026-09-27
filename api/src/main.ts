@@ -4,6 +4,7 @@ import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module.js';
 import { loadConfigOrExit } from './config/configuration.js';
 import { createLogger } from './config/logger.js';
+import { securityWarnings } from './security/startup-warnings.js';
 import { setupApp } from './setup-app.js';
 
 async function bootstrap() {
@@ -11,10 +12,8 @@ async function bootstrap() {
   const config = loadConfigOrExit(process.env, { apiServer: true });
   const app = await NestFactory.create(AppModule, { logger: createLogger() });
   setupApp(app);
-  if (config.security.apiKeys.length === 0) {
-    new Logger('Security').warn(
-      'API_KEYS tanımlı değil: kimlik doğrulama kapalı (sadece yerel geliştirme için)',
-    );
+  for (const warning of securityWarnings(config.security, process.env)) {
+    new Logger('Security').warn(warning);
   }
   await app.listen(config.port);
 }

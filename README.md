@@ -136,7 +136,7 @@ curl -H "$H" 'localhost:3000/logs?userId=scooter-1'
 
 **Ayarlar açılışta doğrulanır.** Ortam değişkenleri servis ayağa kalkmadan kontrol edilir. Verilmeyen değer için varsayılan kullanılır. Verilen ama geçersiz bir değer (ör. `DB_PORT=abc`, `REDIS_URL=http://...`, hatalı `CORS_ORIGINS`) sessizce varsayılana düşmez: servis bütün sorunları birlikte listeleyip 1 koduyla çıkar. Production'da API sunucusu `API_KEYS` olmadan ve 16 karakterden kısa bir anahtarla açılmaz. Worker, migration ve smoke betikleri anahtar kullanmadığı için bu kural onlara uygulanmaz.
 
-**Kuyruk ayarları.** Tamamlanan işler Redis'te birikmez (`removeOnComplete`); başarısız işlerin son 5.000'i incelemek için tutulur. Yeniden deneme ve eşzamanlılık şerit tasarımının parçası (aşağıda).
+**Kuyruk ayarları.** Tamamlanan işler Redis'te birikmez: incelemek için tamamlananların son ~1.000'i, başarısızların son ~5.000'i tutulur. BullMQ bu sınırları kuyruk başına uyguladığı için şeritlere bölünür; bölünmeseydi 64 şerit 64 kat iş biriktirirdi (yük testinden sonra 64 bin iş, 84 MB). Yeniden deneme ve eşzamanlılık şerit tasarımının parçası (aşağıda).
 
 **Toplu istekte sıra korunur.** Toplu istekteki konumlar kullanıcı başına tek işte, zamana göre sıralı tutulur ve worker bunları sırayla işler. Ayrı işler olsalardı paralel worker'lar yeni noktayı eskiden önce işleyebilirdi. O zaman eski nokta "geç gelmiş" sayılıp atlanır ve bir alan girişi kaçabilirdi; e2e testi bu durumu ters sırada gönderilen noktalarla doğruluyor.
 
@@ -263,9 +263,9 @@ docker compose up -d --build
 
 | | Birim | E2E | Smoke (veri yazmaz*) |
 |---|---|---|---|
-| **Backend** | 105 test · `api: npm test` | 59 test · `api: npm run test:e2e` | `api: npm run smoke` |
+| **Backend** | 111 test · `api: npm test` | 60 test · `api: npm run test:e2e` | `api: npm run smoke` |
 | **Veritabanı** | 19 test · `api: npm run test:db` | (backend e2e içinde) | `api: npm run smoke:db` |
-| **Frontend** | 65 test · `clients: npm run test:unit` | 18 tarayıcı testi · `clients: npm run test:ui` | `clients: npm run smoke` |
+| **Frontend** | 66 test · `clients: npm run test:unit` | 18 tarayıcı testi · `clients: npm run test:ui` | `clients: npm run smoke` |
 
 \* Backend smoke testi, gerçek akışı denemek için tek bir sabit test alanı ve benzersiz bir test kullanıcısıyla konum gönderir.
 
@@ -276,7 +276,7 @@ Statik kontroller: `api: npm run lint && npm run typecheck` (testler dahil tam t
 - Worker'ın noktaları sırayla işlemesi; geçici hatada noktayı işin içinde yeniden denemesi (200 ve 400 ms bekleyerek), denemeler tükenince sonraki noktalara geçmemesi; eski biçimdeki (tek konumlu) işleri de işlemesi.
 - Kullanıcıların şeritlere kalıcı ve dengeli dağılması; worker'ın şerit sayısı uyuşmazsa hiçbir şeridi dinlemeden açılmayı reddetmesi.
 - Konum doğrulama, gruplama ve saat payı.
-- Kuyruk dolu koruması, kullanıcı başına rate limit, API anahtarı, istek kimliği, `Retry-After`.
+- Kuyruk dolu koruması, kullanıcı başına rate limit, API anahtarı, istek kimliği, `Retry-After`; yerel geliştirmede sürücü anahtarı eksikse açılış uyarısı.
 - Canlı yayın: bozuk ya da biçimi beklenmedik Redis mesajında çökmeme, konum tamponu.
 - Redis erişilemezken alan oluşturmanın yayını beklememesi, kuyruk derinliği okumalarının birikmemesi, worker metrik portu doluyken çökmeme.
 - Ayar doğrulama (anahtar kuralları sadece API sunucusunda), GeoJSON doğrulama, cursor.
@@ -293,10 +293,10 @@ Statik kontroller: `api: npm run lint && npm run typecheck` (testler dahil tam t
 - Toplu istek sırası, sayfalama ve filtreler.
 - Kullanıcı şeritleri (gerçek Redis): iki worker aynı şeridi dinlerken işlerin üst üste binmemesi ve geliş sırası; denemeleri tükenen işin şeridi tıkamaması; çöken worker'ın işinin sırası bozulmadan diğer worker'a geçmesi; şerit sayısı uyuşmazlığı.
 - Birikmiş kuyrukta aynı kullanıcının işlerinin uçtan uca sırayla işlenmesi; şeritlerden önceki kuyrukta kalmış eski biçimdeki işler.
-- API anahtarı ve sürücü anahtarının sınırları (HTTP ve WebSocket; sürücü bağlantısının tek kullanıcı odasında tutulması), rate limit (sınırdan büyük toplu istek, reddin kotadan düşmemesi), `503` backpressure, metrikler, canlı yayın ve alan duyurusu, ping'e cevap vermeyen bağlantının kapatılması.
+- API anahtarı ve sürücü anahtarının sınırları (HTTP ve WebSocket; sürücü bağlantısının tek kullanıcı odasında tutulması), rate limit (sınırdan büyük toplu istek, reddin kotadan düşmemesi, toplu istekte bir kullanıcı sınırdaysa diğerlerinin sayacına dokunulmaması; testler dakikalık pencerenin sonuna denk gelmesin diye pencerede en az 10 sn kalınca başlar), `503` backpressure, metrikler, canlı yayın ve alan duyurusu, ping'e cevap vermeyen bağlantının kapatılması.
 
 **Frontend birim** (Vitest, hook'lar için jsdom):
-- **Gönderim kuyruğu (`useOutbox`):** çevrimdışı birikim ve tek toplu istek, 100'lük gruplar, `429`'da `Retry-After` kadar bekleme, ağ hatasında noktaları kaybetmeme. Toplu istek tek hatalı nokta yüzünden `400` alırsa grup ikiye bölünür; sadece o nokta atılır. Ardışık hatalı noktalar (ör. saati ileri cihaz) baştan bölme yapılmadan, her biri tek istekle atılır. Gönderim sürerken kuyruk dolup baştan kırpılsa bile gönderilmemiş noktalar silinmez.
+- **Gönderim kuyruğu (`useOutbox`):** çevrimdışı birikim ve tek toplu istek, 100'lük gruplar, `429`'da `Retry-After` kadar bekleme, ağ hatasında noktaları kaybetmeme, `401`'de anahtar sorununu ne yapılacağıyla gösterme. Toplu istek tek hatalı nokta yüzünden `400` alırsa grup ikiye bölünür; sadece o nokta atılır. Ardışık hatalı noktalar (ör. saati ileri cihaz) baştan bölme yapılmadan, her biri tek istekle atılır. Gönderim sürerken kuyruk dolup baştan kırpılsa bile gönderilmemiş noktalar silinmez.
 - **Giriş kayıtları (`useLogs`):** eski filtrenin geç gelen yanıtı ya da önceki sonraki-sayfa isteği yeni sonucu ezmez.
 - **Canlı sayaçlar:** "hizmet bölgesi dışında" sayısı haritadaki gri noktalarla aynı kurala dayanır.
 - **Rota planlama (`useRoutePlanner`):** durak ekleme/silme, yasak bölge sınırı.
@@ -375,6 +375,8 @@ cd ../clients && npm ci
 npm run dev:ops                   # operasyon :5173 (API'ye proxy'ler)
 npm run dev:driver                # sürücü :5174
 ```
+
+Geliştirme proxy'si sürücü uygulaması için `dev-driver-key`, operasyon için `dev-api-key` gönderir; ikisi de `api/.env` içinde tanımlı olmalı (`API_KEYS`, `INGEST_API_KEYS`). Eski bir `.env`'de sürücü anahtarı yoksa API açılışta bunu uyarır, sürücü uygulamasının cihaz günlüğü de `401`'de ne ekleneceğini gösterir.
 
 ## Proje yapısı
 

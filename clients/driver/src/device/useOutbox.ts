@@ -106,6 +106,17 @@ export function useOutbox(online: boolean) {
         batchLimit.current = 1;
         probing.current = true;
         addLog('error', `Sunucu konumu reddetti: ${e.message} (400)`, e.requestId);
+      } else if (e.status === 401 || e.status === 403) {
+        // Anahtar sorunu: tekrar göndermek düzeltmez ama ayar düzelince gidebilsin diye noktalar tutulur.
+        // Yerel geliştirmede en sık sebep, sürücü anahtarının API'de tanımlı olmaması.
+        retryAt.current = Date.now() + NETWORK_RETRY_MS;
+        addLog(
+          'error',
+          e.status === 401
+            ? 'Sunucu sürücü anahtarını tanımadı (401). Yerel geliştirmede api/.env içinde INGEST_API_KEYS=dev-driver-key olmalı'
+            : 'Sürücü anahtarının bu işlem için yetkisi yok (403)',
+          e.requestId,
+        );
       } else {
         retryAt.current = Date.now() + NETWORK_RETRY_MS;
         addLog(

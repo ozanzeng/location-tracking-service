@@ -165,6 +165,18 @@ describe('useOutbox (cihaz gönderim kuyruğu)', () => {
     expect(sendLocations.mock.calls[1][0][0]).toEqual(point(100));
   });
 
+  test("401'de anahtar sorununu ne yapılacağıyla söyler; noktalar korunur, ayar düzelince gider", async () => {
+    sendLocations.mockRejectedValueOnce(new ApiError('Geçersiz API anahtarı', 401, null, 'r'));
+    const { result } = renderHook(() => useOutbox(true));
+    act(() => result.current.record(point(1)));
+    await tick(1000);
+    expect(result.current.log[0]).toMatchObject({ kind: 'error' });
+    expect(result.current.log[0].text).toMatch(/INGEST_API_KEYS=dev-driver-key/);
+    expect(result.current.pending).toBe(1);
+    await tick(5000);
+    expect(result.current.pending).toBe(0);
+  });
+
   test('ağ hatasında noktalar korunur ve 5 sn sonra tekrar denenir', async () => {
     sendLocations.mockRejectedValueOnce(new ApiError('Sunucuya ulaşılamadı', 0, null, null));
     const { result } = renderHook(() => useOutbox(true));

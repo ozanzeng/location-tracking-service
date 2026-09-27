@@ -14,6 +14,17 @@ const KEY = 'test-key';
 const DRIVER_KEY = 'test-driver-key';
 // Rate limit sayaçları Redis'te dakikalık tutulur; koşular birbirini etkilemesin.
 const run = Date.now().toString(36);
+/**
+ * Rate limit sayaçları dakikalık sabit pencerede tutulur. Test pencere bitmek üzereyken
+ * başlarsa istekleri arasında pencere değişir, sayaç sıfırlanır ve beklenen 429 gelmez.
+ * Her test bir saniyeden kısa sürer; pencerede en az `minRemainingMs` kalana kadar bekler.
+ */
+const waitForFreshWindow = async (minRemainingMs: number) => {
+  const remaining = 60_000 - (Date.now() % 60_000);
+  if (remaining < minRemainingMs) {
+    await new Promise((resolve) => setTimeout(resolve, remaining + 50));
+  }
+};
 const location = (userId: string) => ({
   userId,
   ...INSIDE,
@@ -95,6 +106,21 @@ describe('Güvenlik ve gözlemlenebilirlik (e2e)', () => {
   });
 
   describe('kullanıcı başına rate limit', () => {
+    let redis: Redis;
+    /** Kullanıcının bütün pencerelerdeki sayaçlarının toplamı (gerçek Redis). */
+    const counter = async (user: string) => {
+      const keys = await redis.keys(
+        `${loadConfig().queue.prefix}:rl:${user}:*`,
+      );
+      const values = await Promise.all(keys.map((k) => redis.get(k)));
+      return values.reduce((sum, v) => sum + Number(v), 0);
+    };
+    beforeAll(() => {
+      redis = new Redis(loadConfig().redisUrl);
+    });
+    afterAll(() => redis.quit());
+    beforeEach(() => waitForFreshWindow(10_000));
+
     it('dakikalık sınırı aşan isteği 429 ve Retry-After ile reddeder', async () => {
       const user = `rl-${run}`;
       for (let i = 0; i < 3; i++) {
@@ -132,25 +158,38 @@ describe('Güvenlik ve gözlemlenebilirlik (e2e)', () => {
 
     it('reddedilen istek kotayı harcamaz', async () => {
       const user = `norefund-${run}`;
-      const redis = new Redis(loadConfig().redisUrl);
-      const counter = async () => {
-        const keys = await redis.keys(`geofence-test:rl:${user}:*`);
-        const values = await Promise.all(keys.map((k) => redis.get(k)));
-        return values.reduce((sum, v) => sum + Number(v), 0);
-      };
-      try {
-        for (let i = 0; i < 3; i++) {
-          await post('/locations', location(user)).expect(202);
-        }
-        for (let i = 0; i < 3; i++) {
-          await post('/locations/batch', {
-            locations: [location(user), location(user)],
-          }).expect(429);
-        }
-        expect(await counter()).toBe(3);
-      } finally {
-        await redis.quit();
+      for (let i = 0; i < 3; i++) {
+        await post('/locations', location(user)).expect(202);
       }
+      for (let i = 0; i < 3; i++) {
+        await post('/locations/batch', {
+          locations: [location(user), location(user)],
+        }).expect(429);
+      }
+      expect(await counter(user)).toBe(3);
+    });
+
+    it('toplu istekte bir kullanıcı sınırdaysa istek bütünüyle reddedilir; diğerlerinin sayacı artmaz', async () => {
+      const full = `full-${run}`;
+      const other = `fresh-${run}`;
+      for (let i = 0; i < 3; i++) {
+        await post('/locations', location(full)).expect(202);
+      }
+
+      const res = await post('/locations/batch', {
+        locations: [location(other), location(full), location(other)],
+      }).expect(429);
+      // Hata sınırdaki kullanıcıyı söyler, diğerini değil.
+      expect(res.body.message).toContain(full);
+      expect(res.body.message).not.toContain(other);
+      expect(await counter(other)).toBe(0);
+      expect(await counter(full)).toBe(3);
+
+      // Diğer kullanıcının kotası bozulmadı: sınırına kadar gönderebilir.
+      for (let i = 0; i < 3; i++) {
+        await post('/locations', location(other)).expect(202);
+      }
+      await post('/locations', location(other)).expect(429);
     });
   });
 
