@@ -53,15 +53,22 @@ export function useOutbox(online: boolean) {
   /** Kaydedilen konum saniyelik zamanlayıcıyı beklemeden gönderilsin diye flush'a erişim. */
   const flushNow = useRef<() => void>(() => {});
 
+  /** Bağlantı durumu ref'ten okunur: `record` kimliği değişmesin, ölçüm düzeni bozulmasın. */
+  const onlineRef = useRef(online);
+  useEffect(() => {
+    onlineRef.current = online;
+  }, [online]);
+
   const record = useCallback(
     (point: LocationPoint) => {
       queue.current.push(point);
       if (queue.current.length > MAX_QUEUE) queue.current.splice(0, queue.current.length - MAX_QUEUE);
       setPending(queue.current.length);
-      if (!online) addLog(LogKind.QUEUED, `Çevrimdışı: konum sıraya alındı (${queue.current.length} bekliyor)`);
+      if (!onlineRef.current)
+        addLog(LogKind.QUEUED, `Çevrimdışı: konum sıraya alındı (${queue.current.length} bekliyor)`);
       flushNow.current();
     },
-    [online, addLog],
+    [addLog],
   );
 
   /**

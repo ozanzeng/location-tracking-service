@@ -2,11 +2,11 @@ import {
   Inject,
   Injectable,
   Logger,
-  type OnModuleDestroy,
+  type OnApplicationShutdown,
   type OnModuleInit,
 } from '@nestjs/common';
 import type { Redis } from 'ioredis';
-import { createRedis } from '../common/redis/create-redis.js';
+import { closeRedis, createRedis } from '../common/redis/create-redis.js';
 import { APP_CONFIG, type AppConfig } from '../config/configuration.js';
 import {
   areasChannel,
@@ -22,7 +22,7 @@ type Handler<T> = (message: T) => void;
  * Her API instance kendi aboneliğini açtığı için yatay ölçeklemede de çalışır.
  */
 @Injectable()
-export class RealtimeSubscriber implements OnModuleInit, OnModuleDestroy {
+export class RealtimeSubscriber implements OnModuleInit, OnApplicationShutdown {
   private readonly logger = new Logger(RealtimeSubscriber.name);
   private redis: Redis | null = null;
   private readonly updateHandlers: Handler<GeofenceUpdateMessage>[] = [];
@@ -43,16 +43,28 @@ export class RealtimeSubscriber implements OnModuleInit, OnModuleDestroy {
     const updates = updatesChannel(this.config.queue.prefix);
     const areas = areasChannel(this.config.queue.prefix);
 
-    this.redis = createRedis(this.config.redisUrl);
+    this.redis = createRedis(this.config.redisUrl, {
+      name: 'canlı yayın aboneliği',
+    });
     this.redis.on('message', (channel: string, raw: string) => {
       if (channel === updates) this.dispatch(raw, this.updateHandlers);
       else if (channel === areas) this.dispatch(raw, this.areasHandlers);
     });
-    await this.redis.subscribe(updates, areas);
+    // Beklenmez: Redis açılışta erişilemezse API yine ayağa kalkar (/logs, /areas ve 503 veren
+    // /health çalışsın). ioredis bağlantı gelince aboneliği kendisi kurar ve kopunca yeniler.
+    this.redis
+      .subscribe(updates, areas)
+      .catch((err: Error) =>
+        this.logger.warn(`Canlı yayın aboneliği kurulamadı: ${err.message}`),
+      );
   }
 
-  async onModuleDestroy(): Promise<void> {
-    await this.redis?.quit();
+  /**
+   * HTTP sunucusu ve soketler kapandıktan sonra (Nest: onModuleDestroy → sunucu kapanışı →
+   * onApplicationShutdown): kapanırken işlenmekte olan istekler bağlantıyı hâlâ kullanır.
+   */
+  async onApplicationShutdown(): Promise<void> {
+    if (this.redis) await closeRedis(this.redis);
   }
 
   /**

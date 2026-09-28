@@ -1,9 +1,14 @@
 import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import {
+  at,
   createTestApp,
+  INSIDE,
+  logsFor,
   MODA_SQUARE,
+  OUTSIDE,
   resetState,
+  sendLocation,
   waitForQueueDrain,
 } from './helpers.js';
 
@@ -13,11 +18,6 @@ import {
  */
 describe('Case gereksinimleri (e2e)', () => {
   let app: INestApplication;
-  const t0 = Date.parse('2026-01-01T09:00:00.000Z');
-  const at = (seconds: number) => new Date(t0 + seconds * 1000).toISOString();
-
-  const INSIDE = { lat: 40.985, lng: 29.025 };
-  const OUTSIDE = { lat: 41.05, lng: 29.1 };
 
   const http = () => request(app.getHttpServer());
   const createArea = async (name: string, geometry = MODA_SQUARE) =>
@@ -27,23 +27,6 @@ describe('Case gereksinimleri (e2e)', () => {
         .send({ name, type: 'NO_RIDE', geometry })
         .expect(201)
     ).body as { id: string };
-  const sendLocation = (
-    userId: string,
-    point: { lat: number; lng: number },
-    seconds: number,
-  ) =>
-    http()
-      .post('/locations')
-      .send({ userId, ...point, timestamp: at(seconds) })
-      .expect(202);
-  const logsFor = async (userId: string) =>
-    (await http().get('/logs').query({ userId }).expect(200)).body
-      .data as Array<{
-      userId: string;
-      areaId: string;
-      entryTime: string;
-      exitTime: string | null;
-    }>;
 
   beforeAll(async () => {
     app = await createTestApp();
@@ -118,11 +101,11 @@ describe('Case gereksinimleri (e2e)', () => {
   describe('Konum bir alana girdiğinde giriş kaydedilir', () => {
     it('GET /logs kaydı User ID, Area ID ve Entry Time içerir', async () => {
       const area = await createArea('Moda');
-      await sendLocation('user-1', OUTSIDE, 0);
-      await sendLocation('user-1', INSIDE, 5);
+      await sendLocation(app, 'user-1', OUTSIDE, 0);
+      await sendLocation(app, 'user-1', INSIDE, 5);
       await waitForQueueDrain(app);
 
-      const logs = await logsFor('user-1');
+      const logs = await logsFor(app, 'user-1');
       expect(logs).toHaveLength(1);
       expect(logs[0]).toMatchObject({
         userId: 'user-1',
@@ -133,18 +116,18 @@ describe('Case gereksinimleri (e2e)', () => {
 
     it('alan dışındaki konum kayıt üretmez', async () => {
       await createArea('Moda');
-      await sendLocation('user-1', OUTSIDE, 0);
+      await sendLocation(app, 'user-1', OUTSIDE, 0);
       await waitForQueueDrain(app);
-      expect(await logsFor('user-1')).toEqual([]);
+      expect(await logsFor(app, 'user-1')).toEqual([]);
     });
 
     it('5 saniyede bir içeride kalan kullanıcı için tek giriş kaydı tutulur', async () => {
       await createArea('Moda');
       for (let s = 0; s <= 30; s += 5) {
-        await sendLocation('user-1', INSIDE, s);
+        await sendLocation(app, 'user-1', INSIDE, s);
       }
       await waitForQueueDrain(app);
-      expect(await logsFor('user-1')).toHaveLength(1);
+      expect(await logsFor(app, 'user-1')).toHaveLength(1);
     });
 
     it('çakışan iki alana aynı anda girişte her alan için ayrı kayıt açılır', async () => {
@@ -161,10 +144,12 @@ describe('Case gereksinimleri (e2e)', () => {
         ],
       });
       const inner = await createArea('Küçük');
-      await sendLocation('user-1', INSIDE, 0);
+      await sendLocation(app, 'user-1', INSIDE, 0);
       await waitForQueueDrain(app);
 
-      const areaIds = (await logsFor('user-1')).map((l) => l.areaId).sort();
+      const areaIds = (await logsFor(app, 'user-1'))
+        .map((l) => l.areaId)
+        .sort();
       expect(areaIds).toEqual([outer.id, inner.id].sort());
     });
 
@@ -182,9 +167,9 @@ describe('Case gereksinimleri (e2e)', () => {
           ],
         ],
       });
-      await sendLocation('user-1', INSIDE, 0); // (40.985, 29.025) deliğin ortası
+      await sendLocation(app, 'user-1', INSIDE, 0); // (40.985, 29.025) deliğin ortası
       await waitForQueueDrain(app);
-      expect(await logsFor('user-1')).toEqual([]);
+      expect(await logsFor(app, 'user-1')).toEqual([]);
     });
   });
 
@@ -196,7 +181,9 @@ describe('Case gereksinimleri (e2e)', () => {
       // Her kullanıcı: dışarı → içeri → içeri → dışarı → içeri = 2 giriş.
       const path = [OUTSIDE, INSIDE, INSIDE, OUTSIDE, INSIDE];
       for (const [step, point] of path.entries()) {
-        await Promise.all(users.map((u) => sendLocation(u, point, step * 5)));
+        await Promise.all(
+          users.map((u) => sendLocation(app, u, point, step * 5)),
+        );
         await waitForQueueDrain(app);
       }
 
@@ -216,7 +203,7 @@ describe('Case gereksinimleri (e2e)', () => {
       await createArea('Moda');
       await Promise.all(
         Array.from({ length: 25 }, (_, i) =>
-          sendLocation(`page-${i}`, INSIDE, i),
+          sendLocation(app, `page-${i}`, INSIDE, i),
         ),
       );
       await waitForQueueDrain(app);

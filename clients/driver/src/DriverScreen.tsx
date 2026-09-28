@@ -41,7 +41,7 @@ export function DriverScreen() {
   const playback = useRoutePlayback(planner.path, speedKmh, moveTo, planner.clear);
   const outbox = useOutbox(online);
   const { plates, dismiss, currentAreas } = useRiderEvents(scooterId);
-  useGpsSampler(riding, scooterId, live, position, areas, outbox.record);
+  const gps = useGpsSampler(riding, scooterId, live, position, areas, outbox.record);
 
   // Yol ağı yüklenince başlangıç noktasını en yakın yola taşı.
   useEffect(() => {
@@ -96,6 +96,7 @@ export function DriverScreen() {
             roads={roads}
             restrictions={restrictions}
             live={live}
+            onDrag={gps.checkBoundary}
             onDragEnd={onDragEnd}
           />
         </BaseMap>

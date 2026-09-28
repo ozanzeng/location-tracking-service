@@ -80,30 +80,39 @@ describe('Canlı yayın (e2e)', () => {
       await ops.emitWithAck('subscribe', { userId });
     }
 
+    /** Soketin aldığı konumlar, geliş sırasıyla. */
     const seenBy = (socket: Socket) => {
-      const users = new Set<string>();
-      socket.on('position', (p: { userId: string }) => users.add(p.userId));
+      const users: string[] = [];
+      socket.on('position', (p: { userId: string }) => users.push(p.userId));
       return users;
     };
     const driverSaw = seenBy(driver);
     const opsSaw = seenBy(ops);
-    for (const userId of ['room-a', 'room-b']) {
-      await request(app.getHttpServer())
+    const send = (userId: string, secondsAgo: number) =>
+      request(app.getHttpServer())
         .post('/locations')
         .set('x-api-key', KEY)
         .send({
           userId,
           ...INSIDE,
-          timestamp: new Date(Date.now() - 1000).toISOString(),
+          timestamp: new Date(Date.now() - secondsAgo * 1000).toISOString(),
         })
         .expect(202);
-    }
+    await send('room-a', 2);
+    await send('room-b', 2);
+    await vi.waitFor(() => {
+      expect(new Set(opsSaw)).toEqual(new Set(['room-a', 'room-b']));
+      expect(driverSaw).toContain('room-b');
+    });
 
+    // İşaret: room-b'ye bir konum daha. Aynı soketteki mesajlar sırayla gelir; sürücü room-a'yı
+    // alsaydı (ops onu çoktan aldı) o mesaj işaretten önce ulaşmış olurdu.
+    await send('room-b', 1);
     await vi.waitFor(() =>
-      expect(opsSaw).toEqual(new Set(['room-a', 'room-b'])),
+      expect(driverSaw.filter((u) => u === 'room-b')).toHaveLength(2),
     );
     // Sürücü ikinci aboneliğinde ilk odadan çıkarıldı: sadece room-b'yi görür.
-    expect(driverSaw).toEqual(new Set(['room-b']));
+    expect(driverSaw).not.toContain('room-a');
   });
 
   it('yeni alan oluşturulunca bağlı istemcilere duyurur', async () => {

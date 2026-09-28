@@ -3,6 +3,7 @@ import request from 'supertest';
 import { DataSource } from 'typeorm';
 import { GeofenceService } from '../src/geofence/geofence.service.js';
 import {
+  at,
   createTestApp,
   INSIDE,
   MODA_SQUARE,
@@ -12,8 +13,6 @@ import {
 
 describe('GET /logs (e2e)', () => {
   let app: INestApplication;
-  const t0 = Date.parse('2026-01-01T09:00:00.000Z');
-  const at = (seconds: number) => new Date(t0 + seconds * 1000).toISOString();
 
   beforeAll(async () => {
     app = await createTestApp();
@@ -122,5 +121,23 @@ describe('GET /logs (e2e)', () => {
     await request(app.getHttpServer()).get('/logs?areaId=nope').expect(400);
     await request(app.getHttpServer()).get('/logs?active=evet').expect(400);
     await request(app.getHttpServer()).get('/logs?cursor=bozuk').expect(400);
+  });
+
+  it("Postgres'in çözemeyeceği zaman ve cursor değerlerini 500 yerine 400 ile reddeder", async () => {
+    const cursor = (text: string) => Buffer.from(text).toString('base64url');
+    for (const query of [
+      'from=2024',
+      'from=2026-02-30T00:00:00Z',
+      'to=2026-W05',
+      'to=2026-09-28T10:00:00',
+      `cursor=${cursor('2026-01-01T00:00:00Z|99999999999999999999')}`,
+      `cursor=${cursor('2026-02-30T00:00:00Z|1')}`,
+    ]) {
+      const res = await request(app.getHttpServer()).get(`/logs?${query}`);
+      expect({ query, status: res.status }).toEqual({ query, status: 400 });
+    }
+    await request(app.getHttpServer())
+      .get('/logs?from=2026-01-01T00:00:00Z')
+      .expect(200);
   });
 });

@@ -8,5 +8,14 @@ export default defineConfig({
   },
   test: {
     include: ['driver/src/**/*.test.ts', 'ops/src/**/*.test.ts', 'shared/src/**/*.test.ts'],
+    setupFiles: ['./vitest.setup.ts'],
+    // vi.stubGlobal (ör. fetch) her testten sonra geri alınır.
+    unstubGlobals: true,
+    coverage: {
+      provider: 'v8',
+      // Hiç yüklenmeyen dosyalar da raporda görünsün (yoksa oran olduğundan yüksek çıkar).
+      include: ['driver/src/**/*.{ts,tsx}', 'ops/src/**/*.{ts,tsx}', 'shared/src/**/*.{ts,tsx}'],
+      exclude: ['**/*.test.ts', '**/main.tsx'],
+    },
   },
 });

@@ -15,11 +15,13 @@ describe('startMetricsServer', () => {
 
     // 'error' dinleyicisi olmasaydı EADDRINUSE yakalanmamış istisna olarak süreci düşürürdü.
     const server = startMetricsServer(port, logger);
+    // Test başarısız olsa da portlar bırakılsın.
+    onTestFinished(() => {
+      server.close();
+      occupant.close();
+    });
     await vi.waitFor(() => expect(logger.error).toHaveBeenCalled());
     expect(vi.mocked(logger.error).mock.calls[0][0]).toMatch(/EADDRINUSE/);
-
-    server.close();
-    occupant.close();
   });
 
   it('/metrics Prometheus formatında yanıt verir', async () => {
@@ -30,11 +32,11 @@ describe('startMetricsServer', () => {
     await new Promise((resolve) => probe.close(resolve));
 
     const server = startMetricsServer(port, logger);
+    onTestFinished(() => void server.close());
     await vi.waitFor(() => expect(logger.log).toHaveBeenCalled());
     const res = await fetch(`http://127.0.0.1:${port}/metrics`);
     expect(res.status).toBe(200);
     expect(await res.text()).toMatch(/process_cpu_user_seconds_total/);
     expect((await fetch(`http://127.0.0.1:${port}/`)).status).toBe(404);
-    server.close();
   });
 });

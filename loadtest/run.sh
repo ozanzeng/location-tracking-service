@@ -1,7 +1,14 @@
 #!/usr/bin/env bash
 # k6'yı compose ağında çalıştırır, ardından kuyruğun ne zaman boşaldığını ölçer.
 # Kullanım: PEAK_RPS=2000 WORKERS=2 ./loadtest/run.sh
-set -euo pipefail
+#
+# İki ayrı hız yazılır:
+# - Worker hızı (boşalma): yük bittiğinde kuyrukta kalan işler / boşalma süresi. Worker'lar
+#   o sırada doygun çalışır, bu yüzden kapasiteye en yakın sayı budur. k6 durduğu için CPU'yu
+#   worker'lar paylaşır; yük sırasındaki hız bundan düşük olabilir.
+# - Ortalama işleme: kabul edilen / toplam süre. Yük profiliyle sınırlıdır (k6 kaç istek
+#   gönderebildiyse); kapasite değil, alt sınırdır.
+set -uo pipefail
 cd "$(dirname "$0")/.."
 
 WORKERS="${WORKERS:-2}"
@@ -15,19 +22,49 @@ queue_backlog() {
   curl -s localhost:3000/health | python3 -c 'import json,sys; q=json.load(sys.stdin)["queue"]; print(q["waiting"]+q["active"]+q["delayed"])'
 }
 
+# Yük sırasında saniyede bir kuyruk derinliği: en yüksek birikim yazılır.
+samples=loadtest/results/backlog.txt
+: > "$samples"
+( while true; do queue_backlog >> "$samples" 2>/dev/null; sleep 1; done ) &
+sampler=$!
+
 start=$(date +%s)
 docker compose --profile loadtest run --rm -e PEAK_RPS="$PEAK_RPS" k6 \
-  run --summary-export=/results/summary.json /scripts/locations.k6.js || true
+  run --summary-export=/results/summary.json /scripts/locations.k6.js
+rc=$?
 ingest_end=$(date +%s)
+kill "$sampler" 2>/dev/null
+wait "$sampler" 2>/dev/null
 
-echo "k6 bitti, kuyruk bekleniyor (backlog: $(queue_backlog))"
+backlog_at_end=$(queue_backlog)
+echo "k6 bitti, kuyruk bekleniyor (backlog: $backlog_at_end)"
+drain_start=$(python3 -c 'import time; print(time.time())')
 while [ "$(queue_backlog)" -gt 0 ]; do sleep 0.5; done
 drained=$(date +%s)
+drain_seconds=$(python3 -c "import time; print(max(time.time() - $drain_start, 0.5))")
 
-accepted=$(python3 -c 'import json; m=json.load(open("loadtest/results/summary.json"))["metrics"]; print(int(m["checks"]["passes"]))')
+read -r accepted dropped <<<"$(python3 -c '
+import json
+m = json.load(open("loadtest/results/summary.json"))["metrics"]
+print(int(m["checks"]["passes"]), int(m.get("dropped_iterations", {}).get("count", 0)))')"
+peak_backlog=$(sort -n "$samples" | tail -1)
+
 echo
-echo "Worker sayısı       : $WORKERS"
-echo "Kabul edilen konum  : $accepted"
-echo "Yük süresi          : $((ingest_end - start)) sn"
-echo "Kuyruk boşalma      : $((drained - ingest_end)) sn (yük bittikten sonra)"
-echo "İşleme hızı (ort.)  : $((accepted / (drained - start))) konum/sn"
+echo "Worker sayısı          : $WORKERS"
+echo "Kabul edilen konum     : $accepted"
+echo "Düşen istek (k6)       : $dropped$([ "$dropped" -gt 0 ] && echo "  ← k6 hedef hıza ulaşamadı; koşular karşılaştırılamaz")"
+echo "Yük süresi             : $((ingest_end - start)) sn"
+echo "En yüksek birikim      : ${peak_backlog:-0} iş"
+echo "Kuyruk boşalma         : $((drained - ingest_end)) sn (yük bittikten sonra, $backlog_at_end iş)"
+if [ "$backlog_at_end" -gt 0 ]; then
+  echo "Worker hızı (boşalma)  : $(python3 -c "print(round($backlog_at_end / $drain_seconds))") iş/sn"
+else
+  echo "Worker hızı (boşalma)  : ölçülemedi (yük bitince kuyruk boştu; worker'lar yüke yetişti)"
+fi
+echo "Ortalama işleme        : $((accepted / (drained - start))) konum/sn (alt sınır)"
+if [ "$rc" -eq 0 ]; then
+  echo "k6 eşikleri            : geçti"
+else
+  echo "k6 eşikleri            : KALDI (çıkış kodu $rc)"
+fi
+exit "$rc"

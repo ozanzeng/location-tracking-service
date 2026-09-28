@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
+import { describe, expect, test, vi } from 'vitest';
 import { api, ApiError } from './client';
 
 const point = { userId: 'u1', lat: 41, lng: 29, timestamp: '2026-01-01T10:00:00Z' };
@@ -18,9 +18,6 @@ type Call = [string, { body: string; headers: Record<string, string> }];
 const calls = (fetchMock: ReturnType<typeof mockFetch>) => fetchMock.mock.calls as unknown as Call[];
 
 describe('api istemcisi', () => {
-  beforeEach(() => vi.unstubAllGlobals());
-  afterEach(() => vi.unstubAllGlobals());
-
   test('tek konum POST /locations, birden fazlası POST /locations/batch', async () => {
     const fetchMock = mockFetch(202, { jobId: '1' }, { 'x-request-id': 'r1' });
     await api.sendLocations([point]);

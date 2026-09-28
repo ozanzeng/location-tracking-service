@@ -3,7 +3,7 @@ import { act, renderHook } from '@testing-library/react';
 import { describe, expect, test } from 'vitest';
 import type { Zone } from '../geo/zone';
 import { RoadNetwork, type CompactRoads } from '../roads/RoadNetwork';
-import { useRoutePlanner } from './useRoutePlanner';
+import { NoticeKind, useRoutePlanner } from './useRoutePlanner';
 
 // Dört tarafı yollu ~220 m'lik blok; üst kenarın ortasında küçük bir sürüş yasak bölge.
 //   B ──[X]── C
@@ -41,7 +41,7 @@ describe('useRoutePlanner', () => {
   test('sürüş yasak bölge içindeki durak bölgenin sınırına konur', () => {
     const { result, snap } = setup();
     act(() => result.current.addStop(snap(0.002, 0.001))); // bölgenin ortası
-    expect(result.current.notice).toMatchObject({ kind: 'info' });
+    expect(result.current.notice).toMatchObject({ kind: NoticeKind.INFO });
     const stop = result.current.stops[0];
     // Batı sınırı (lng 29.0008) ya da doğu sınırı (lng 29.0012); bölgenin içinde değil.
     expect([29.0008, 29.0012].some((lng) => Math.abs(stop.lng - lng) < 1e-7)).toBe(true);
@@ -52,10 +52,13 @@ describe('useRoutePlanner', () => {
     act(() => result.current.addStop(snap(0.001, 0)));
     act(() => result.current.addStop(snap(0.002, 0.0003)));
     act(() => result.current.addStop(snap(0.001, 0.002)));
-    const withMiddle = result.current.length;
     act(() => result.current.removeStop(1));
-    expect(result.current.stops).toHaveLength(2);
-    expect(result.current.length).not.toBe(withMiddle);
+    // Silinen ortadaki durak: kalanlar ilk ve son durak, rota da sadece onlarla kurulmuş gibi.
+    expect(result.current.stops).toEqual([snap(0.001, 0).point, snap(0.001, 0.002).point]);
+    const direct = setup();
+    act(() => direct.result.current.addStop(direct.snap(0.001, 0)));
+    act(() => direct.result.current.addStop(direct.snap(0.001, 0.002)));
+    expect(result.current.length).toBeCloseTo(direct.result.current.length, 6);
   });
 
   test('son durak silinince rota temizlenir', () => {

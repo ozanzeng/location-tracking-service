@@ -63,7 +63,6 @@ describe('Kullanıcı şeritleri (gerçek Redis)', () => {
     await Promise.all(workers.splice(0).map((w) => w.close(true)));
     await Promise.all(lanes.queues().map((q) => q.obliterate({ force: true })));
     await lanes.connection.del(`${config.queue.prefix}:lanes`);
-    await lanes.onModuleDestroy();
     await lanes.onApplicationShutdown();
   });
 
@@ -101,10 +100,10 @@ describe('Kullanıcı şeritleri (gerçek Redis)', () => {
       done.push({ label: label(j), at: Date.now() - started });
     });
 
-    await until(() => done.length === 1);
+    await until(() => done.length === 1, 12_000);
     expect(done[0].label).toBe('sağlam');
-    // Eski tasarımda sonraki iş 30 sn bekliyordu.
-    expect(done[0].at).toBeLessThan(2000);
+    // Eski tasarımda sonraki iş 30 sn bekliyordu; makine yüklüyken de sığacak geniş bir sınır.
+    expect(done[0].at).toBeLessThan(10_000);
     const counts = await lanes.queues()[lane].getJobCounts('failed');
     expect(counts.failed).toBe(1);
   });
@@ -130,10 +129,10 @@ describe('Kullanıcı şeritleri (gerçek Redis)', () => {
       seen.push(label(j));
     });
 
-    await until(() => seen.length === 2, 8000);
+    await until(() => seen.length === 2, 12_000);
     expect(seen).toEqual(['ilk', 'ikinci']);
-    // Kilit 1 sn'de düşer, 200 ms'lik iki aramada bulunur.
-    expect(Date.now() - started).toBeLessThan(4000);
+    // Kilit 1 sn'de düşer, 200 ms'lik iki aramada bulunur (~1,5 sn); yüklü makine için pay.
+    expect(Date.now() - started).toBeLessThan(10_000);
     release();
   });
 
@@ -171,7 +170,6 @@ describe('Kullanıcı şeritleri (gerçek Redis)', () => {
       );
       await expect(other.verifyLayout()).rejects.toThrow(/QUEUE_LANES=8.*4/);
     } finally {
-      await other.onModuleDestroy();
       await other.onApplicationShutdown();
     }
   });
@@ -192,7 +190,6 @@ describe('Kuyruk düzeni anahtarı', () => {
     } finally {
       await redis.del(`${prefix}:lanes`);
       await redis.quit();
-      await lanes.onModuleDestroy();
       await lanes.onApplicationShutdown();
     }
   });

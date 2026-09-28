@@ -9,8 +9,10 @@ x-api-env: &api-env
   CORS_ORIGINS: ""
   DB_HOST: postgres
   DB_PORT: 5432
-  DB_USER: geofence
-  DB_PASSWORD: geofence
+  # API ve worker, sadece gereken tablolara yetkili uygulama rolüyle bağlanır; rolü migrate
+  # oluşturur (api/src/database/app-role.ts). Şema sahibi (superuser) sadece migrate'te.
+  DB_USER: geofence_app
+  DB_PASSWORD: ${DB_APP_PASSWORD:-geofence_app}
   DB_NAME: geofence
   DB_POOL_SIZE: 20
   REDIS_URL: redis://redis:6379
@@ -66,7 +68,12 @@ services:
   migrate:
     build: ./api
     command: ["node", "dist/database/migrate.js"]
-    environment: *api-env
+    environment:
+      <<: *api-env
+      DB_USER: geofence
+      DB_PASSWORD: geofence
+      DB_APP_USER: geofence_app
+      DB_APP_PASSWORD: ${DB_APP_PASSWORD:-geofence_app}
     depends_on:
       postgres:
         condition: service_healthy

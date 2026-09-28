@@ -26,13 +26,14 @@ const processed = (recordedAt: string, events = 0): ProcessResult => ({
 const setup = (worker: Partial<AppConfig['worker']> = {}) => {
   const order: string[] = [];
   const geofence = {
-    process: vi.fn(async (p: { recordedAt: string }) => {
+    // Tipli mock: GeofenceService.process imzası değişirse typecheck burada da kırılır.
+    process: vi.fn<GeofenceService['process']>(async (p) => {
       order.push(p.recordedAt);
       return p.recordedAt === 't2'
-        ? ({ status: ProcessStatus.STALE } as const)
+        ? { status: ProcessStatus.STALE }
         : processed(p.recordedAt, 1);
     }),
-  };
+  } satisfies Partial<GeofenceService>;
   const publish = vi.fn().mockResolvedValue(undefined);
   const processor = new LocationProcessor(
     geofence as unknown as GeofenceService,

@@ -1,5 +1,6 @@
 import type { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
+import request from 'supertest';
 import { DataSource } from 'typeorm';
 import { AppModule } from '../src/app.module.js';
 import {
@@ -30,7 +31,10 @@ export async function createTestApp(
     .overrideProvider(APP_CONFIG)
     .useValue(options.config ? options.config(base) : base)
     .compile();
-  const app = moduleRef.createNestApplication({ logger: ['error', 'warn'] });
+  const app = moduleRef.createNestApplication({
+    logger: ['error', 'warn'],
+    return503OnClosing: true,
+  });
   setupApp(app);
   await app.listen(0);
   return app;
@@ -86,3 +90,37 @@ export const MODA_SQUARE = {
 
 export const INSIDE = { lat: 40.985, lng: 29.025 };
 export const OUTSIDE = { lat: 41.05, lng: 29.1 };
+
+/** Sabit bir başlangıç anından `seconds` saniye sonrası (ISO 8601): testler saatten bağımsız. */
+const T0 = Date.parse('2026-01-01T09:00:00.000Z');
+export const at = (seconds: number) =>
+  new Date(T0 + seconds * 1000).toISOString();
+
+/** Konum gönderir, 202 bekler. */
+export const sendLocation = (
+  app: INestApplication,
+  userId: string,
+  point: { lat: number; lng: number },
+  seconds: number,
+) =>
+  request(app.getHttpServer())
+    .post('/locations')
+    .send({ userId, ...point, timestamp: at(seconds) })
+    .expect(202);
+
+export interface LogRow {
+  id: string;
+  userId: string;
+  areaId: string;
+  entryTime: string;
+  exitTime: string | null;
+}
+
+/** Kullanıcının giriş kayıtları (en yeni başta). */
+export const logsFor = async (app: INestApplication, userId: string) =>
+  (
+    await request(app.getHttpServer())
+      .get('/logs')
+      .query({ userId })
+      .expect(200)
+  ).body.data as LogRow[];

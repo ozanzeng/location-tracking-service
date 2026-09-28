@@ -109,8 +109,38 @@ describe('useGpsSampler (konum ölçümü)', () => {
 
   test('yeni alan tanımlanınca (scooter yerinden oynamadan) ek ölçüm yapmaz', async () => {
     const { rerender } = render({ position: INSIDE });
+    // İlk ölçümden 1 sn'den fazla geçsin: hatalı bir ek ölçüm ertelenmeden hemen görünür.
+    await act(() => vi.advanceTimersByTimeAsync(2000));
     const other = { ...park, id: 'other' };
     rerender({ position: INSIDE, areas: [park, other], active: true });
+    await act(() => vi.advanceTimersByTimeAsync(1000));
+    expect(record).toHaveBeenCalledTimes(1);
+  });
+
+  test('sürüklerken (ekrandaki konum henüz değişmeden) alana girilince hemen ölçer', async () => {
+    const { result } = render();
+    await act(() => vi.advanceTimersByTimeAsync(2000));
+    // Sürükleme: canlı konum değişir, ekrandaki konum bırakılana kadar aynı kalır.
+    act(() => result.current.checkBoundary(INSIDE));
+    expect(record).toHaveBeenCalledTimes(2);
+    act(() => result.current.checkBoundary(INSIDE_2));
+    expect(record).toHaveBeenCalledTimes(2);
+  });
+
+  test('gönderim fonksiyonu değişince (ör. bağlantı durumu) ölçüm baştan başlamaz', async () => {
+    const live = { current: OUTSIDE };
+    const { rerender } = renderHook(
+      ({ send }: { send: (p: LocationPoint) => void }) => useGpsSampler(true, 'scooter-1', live, OUTSIDE, [park], send),
+      { initialProps: { send: record } },
+    );
+    await act(() => vi.advanceTimersByTimeAsync(2000));
+    const next = vi.fn<(p: LocationPoint) => void>();
+    rerender({ send: next });
+    // Fazladan ölçüm yok; 5 sn düzeni ilk ölçümden devam eder ve yeni fonksiyonu kullanır.
+    expect(record).toHaveBeenCalledTimes(1);
+    expect(next).not.toHaveBeenCalled();
+    await act(() => vi.advanceTimersByTimeAsync(3000));
+    expect(next).toHaveBeenCalledTimes(1);
     expect(record).toHaveBeenCalledTimes(1);
   });
 

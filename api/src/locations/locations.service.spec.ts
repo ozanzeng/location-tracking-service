@@ -1,4 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
+import type { Mock } from 'vitest';
 import type { LocationLanes } from '../queue/location-lanes.js';
 import type { UserRateLimiter } from '../security/user-rate-limiter.js';
 import { LocationsService } from './locations.service.js';
@@ -7,21 +8,20 @@ import type { QueueBackpressure } from './queue-backpressure.js';
 describe('LocationsService', () => {
   const now = new Date('2026-09-25T10:00:00.000Z');
   const ts = '2026-09-25T09:59:00.000Z';
-  let add: ReturnType<typeof vi.fn>;
-  let addMany: ReturnType<typeof vi.fn>;
-  let consume: ReturnType<typeof vi.fn>;
-  let assertCapacity: ReturnType<typeof vi.fn>;
+  // Tipli mock'lar: bağımlılıkların imzası değişirse typecheck burada da kırılır.
+  let add: Mock<LocationLanes['add']>;
+  let addMany: Mock<LocationLanes['addMany']>;
+  let consume: Mock<UserRateLimiter['consume']>;
+  let assertCapacity: Mock<QueueBackpressure['assertCapacity']>;
   let service: LocationsService;
 
   beforeEach(() => {
-    add = vi.fn().mockResolvedValue('5:7');
+    add = vi.fn<LocationLanes['add']>().mockResolvedValue('5:7');
     addMany = vi
-      .fn()
-      .mockImplementation(async (jobs: unknown[]) =>
-        jobs.map((_, i) => `5:${i + 1}`),
-      );
-    consume = vi.fn().mockResolvedValue(undefined);
-    assertCapacity = vi.fn();
+      .fn<LocationLanes['addMany']>()
+      .mockImplementation(async (jobs) => jobs.map((_, i) => `5:${i + 1}`));
+    consume = vi.fn<UserRateLimiter['consume']>().mockResolvedValue(undefined);
+    assertCapacity = vi.fn<QueueBackpressure['assertCapacity']>();
     service = new LocationsService(
       { add, addMany } as unknown as LocationLanes,
       { consume } as unknown as UserRateLimiter,

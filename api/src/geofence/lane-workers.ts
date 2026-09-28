@@ -8,6 +8,7 @@ import {
 import { type Job, type Processor, Worker } from 'bullmq';
 import type { Redis } from 'ioredis';
 import { APP_CONFIG, type AppConfig } from '../config/configuration.js';
+import { throttledErrorLogger } from '../common/redis/create-redis.js';
 import { LocationLanes } from '../queue/location-lanes.js';
 import { LocationProcessor } from './location.processor.js';
 
@@ -52,6 +53,7 @@ export class LaneWorkers implements OnApplicationBootstrap, OnModuleDestroy {
     await this.lanes.verifyLayout();
     // Global sınır worker'lar iş almadan önce kurulmalı.
     await this.lanes.enforceOneJobPerLane();
+    const onError = throttledErrorLogger('worker');
     this.workers = this.lanes.queues().map((queue) => {
       const worker = createLaneWorker(
         queue.name,
@@ -60,9 +62,7 @@ export class LaneWorkers implements OnApplicationBootstrap, OnModuleDestroy {
         this.lanes.connection,
       );
       worker.on('failed', (job, err) => this.processor.onFailed(job, err));
-      worker.on('error', (err) =>
-        this.logger.warn(`Worker hatası (${queue.name}): ${err.message}`),
-      );
+      worker.on('error', onError);
       return worker;
     });
     this.logger.log(`Worker hazır (${this.lanes.count} şerit)`);

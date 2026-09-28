@@ -28,3 +28,20 @@ describe('RealtimeSubscriber.dispatch', () => {
     expect(next).toHaveBeenCalledWith({ position: {} });
   });
 });
+
+describe('RealtimeSubscriber açılışı', () => {
+  it('Redis erişilemezken açılışı bekletmez (API yine ayağa kalkar)', async () => {
+    const base = loadConfig({});
+    const subscriber = new RealtimeSubscriber({
+      ...base,
+      redisUrl: 'redis://127.0.0.1:1',
+      realtime: { ...base.realtime, enabled: true },
+    });
+    const opened = await Promise.race([
+      subscriber.onModuleInit().then(() => 'açıldı'),
+      new Promise((resolve) => setTimeout(() => resolve('bekliyor'), 1000)),
+    ]);
+    expect(opened).toBe('açıldı');
+    await subscriber.onApplicationShutdown();
+  });
+});

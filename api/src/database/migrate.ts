@@ -2,18 +2,18 @@ import 'reflect-metadata';
 import { DataSource } from 'typeorm';
 import { loadConfigOrExit } from '../config/configuration.js';
 import { loadEnvFile } from '../config/load-env.js';
+import { ensureAppRole } from './app-role.js';
 import { revertLastMigration } from './migration-runner.js';
 import { typeOrmOptions } from './typeorm-options.js';
 
 loadEnvFile();
 
 const direction = process.argv[2] === 'revert' ? 'revert' : 'run';
+const config = loadConfigOrExit();
 const dataSource = new DataSource(
   typeOrmOptions(
     // Migration'larda sorgu süresi sınırı yok: büyük tabloda index oluşturmak uzun sürebilir.
-    (({ db, ...rest }) => ({ ...rest, db: { ...db, statementTimeoutMs: 0 } }))(
-      loadConfigOrExit(),
-    ),
+    { ...config, db: { ...config.db, statementTimeoutMs: 0 } },
   ),
 );
 
@@ -29,6 +29,11 @@ try {
         ? `Uygulanan migration'lar: ${applied.map((m) => m.name).join(', ')}`
         : 'Şema güncel.',
     );
+    const { appUser, appPassword } = config.db;
+    if (appUser && appPassword) {
+      const result = await ensureAppRole(dataSource, appUser, appPassword);
+      console.log(`Uygulama rolü ${appUser} ${result}.`);
+    }
   }
 } finally {
   await dataSource.destroy();

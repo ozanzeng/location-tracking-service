@@ -2,11 +2,11 @@ import {
   Inject,
   Injectable,
   Logger,
-  type OnModuleDestroy,
+  type OnApplicationShutdown,
 } from '@nestjs/common';
 import type { Redis } from 'ioredis';
 import { APP_CONFIG, type AppConfig } from '../config/configuration.js';
-import { createRedis } from '../common/redis/create-redis.js';
+import { closeRedis, createRedis } from '../common/redis/create-redis.js';
 import {
   areasChannel,
   updatesChannel,
@@ -15,7 +15,7 @@ import {
 } from './realtime.constants.js';
 
 @Injectable()
-export class RealtimePublisher implements OnModuleDestroy {
+export class RealtimePublisher implements OnApplicationShutdown {
   private readonly logger = new Logger(RealtimePublisher.name);
   private readonly redis: Redis | null;
   private readonly updates: string;
@@ -27,7 +27,11 @@ export class RealtimePublisher implements OnModuleDestroy {
     // failFast: Redis düşükken yayınlar çevrimdışı kuyrukta birikip beklemesin; canlı yayın
     // en iyi çabadır, kaçan mesajı istemciler bir sonraki konumla telafi eder.
     this.redis = config.realtime.enabled
-      ? createRedis(config.redisUrl, { lazyConnect: true, failFast: true })
+      ? createRedis(config.redisUrl, {
+          lazyConnect: true,
+          failFast: true,
+          name: 'canlı yayın',
+        })
       : null;
   }
 
@@ -51,7 +55,11 @@ export class RealtimePublisher implements OnModuleDestroy {
     }
   }
 
-  async onModuleDestroy(): Promise<void> {
-    await this.redis?.quit();
+  /**
+   * HTTP sunucusu ve soketler kapandıktan sonra (Nest: onModuleDestroy → sunucu kapanışı →
+   * onApplicationShutdown): kapanırken işlenmekte olan istekler bağlantıyı hâlâ kullanır.
+   */
+  async onApplicationShutdown(): Promise<void> {
+    if (this.redis) await closeRedis(this.redis);
   }
 }

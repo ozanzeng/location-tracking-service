@@ -36,6 +36,16 @@ describe('useOutbox (cihaz gönderim kuyruğu)', () => {
     expect(result.current.log[0].text).toBe('Konum gönderildi');
   });
 
+  test('bağlantı durumu değişince kayıt fonksiyonu aynı kalır (ölçüm düzeni bozulmaz)', () => {
+    const { result, rerender } = renderHook(({ online }) => useOutbox(online), { initialProps: { online: true } });
+    const record = result.current.record;
+    rerender({ online: false });
+    expect(result.current.record).toBe(record);
+    // Çevrimdışı olduğunu yine de bilir.
+    act(() => result.current.record(point(1)));
+    expect(result.current.log[0]).toMatchObject({ kind: 'queued' });
+  });
+
   test('kaydedilen konum saniyelik zamanlayıcıyı beklemeden gönderilir', async () => {
     const { result } = renderHook(() => useOutbox(true));
     await tick(300); // zamanlayıcının bir sonraki turuna daha 700 ms var

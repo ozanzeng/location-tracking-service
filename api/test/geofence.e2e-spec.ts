@@ -8,39 +8,20 @@ import {
 } from '../src/queue/location-job.js';
 import { GeofenceService } from '../src/geofence/geofence.service.js';
 import {
+  at,
   createTestApp,
   INSIDE,
+  logsFor,
   MODA_SQUARE,
   OUTSIDE,
   resetState,
+  sendLocation,
   waitForQueueDrain,
 } from './helpers.js';
 
 describe('Konum → alan giriş/çıkış (e2e)', () => {
   let app: INestApplication;
   let areaId: string;
-  const t0 = Date.parse('2026-01-01T09:00:00.000Z');
-  const at = (seconds: number) => new Date(t0 + seconds * 1000).toISOString();
-
-  const sendLocation = (
-    userId: string,
-    point: { lat: number; lng: number },
-    seconds: number,
-  ) =>
-    request(app.getHttpServer())
-      .post('/locations')
-      .send({ userId, ...point, timestamp: at(seconds) })
-      .expect(202);
-
-  const logsFor = async (userId: string) => {
-    const res = await request(app.getHttpServer())
-      .get(`/logs?userId=${userId}`)
-      .expect(200);
-    return res.body.data as Array<{
-      entryTime: string;
-      exitTime: string | null;
-    }>;
-  };
 
   beforeAll(async () => {
     app = await createTestApp();
@@ -56,16 +37,16 @@ describe('Konum → alan giriş/çıkış (e2e)', () => {
   afterAll(() => app.close());
 
   it('girişi loglar, çıkışta exitTime dolar, içeride kalmak yeni log üretmez', async () => {
-    await sendLocation('u1', OUTSIDE, 0);
+    await sendLocation(app, 'u1', OUTSIDE, 0);
     await waitForQueueDrain(app);
-    await sendLocation('u1', INSIDE, 1);
+    await sendLocation(app, 'u1', INSIDE, 1);
     await waitForQueueDrain(app);
-    await sendLocation('u1', INSIDE, 2);
+    await sendLocation(app, 'u1', INSIDE, 2);
     await waitForQueueDrain(app);
-    await sendLocation('u1', OUTSIDE, 3);
+    await sendLocation(app, 'u1', OUTSIDE, 3);
     await waitForQueueDrain(app);
 
-    const logs = await logsFor('u1');
+    const logs = await logsFor(app, 'u1');
     expect(logs).toEqual([
       expect.objectContaining({
         userId: 'u1',
@@ -78,11 +59,11 @@ describe('Konum → alan giriş/çıkış (e2e)', () => {
 
   it('çıkıp tekrar giren kullanıcı için yeni giriş kaydı açar', async () => {
     for (const [i, point] of [INSIDE, OUTSIDE, INSIDE].entries()) {
-      await sendLocation('u1', point, i);
+      await sendLocation(app, 'u1', point, i);
       await waitForQueueDrain(app);
     }
 
-    const logs = await logsFor('u1');
+    const logs = await logsFor(app, 'u1');
     expect(logs.map((l) => [l.entryTime, l.exitTime])).toEqual([
       [at(2), null],
       [at(0), at(1)],
@@ -90,13 +71,13 @@ describe('Konum → alan giriş/çıkış (e2e)', () => {
   });
 
   it('kendisinden eski bir konumu yok sayar', async () => {
-    await sendLocation('u1', INSIDE, 10);
+    await sendLocation(app, 'u1', INSIDE, 10);
     await waitForQueueDrain(app);
     // Ağda gecikmiş, daha önce ölçülmüş bir "dışarıda" konumu geç geliyor.
-    await sendLocation('u1', OUTSIDE, 5);
+    await sendLocation(app, 'u1', OUTSIDE, 5);
     await waitForQueueDrain(app);
 
-    const logs = await logsFor('u1');
+    const logs = await logsFor(app, 'u1');
     expect(logs.map((l) => [l.entryTime, l.exitTime])).toEqual([
       [at(10), null],
     ]);
@@ -104,11 +85,11 @@ describe('Konum → alan giriş/çıkış (e2e)', () => {
 
   it('aynı kullanıcı için 50 eşzamanlı istek tam olarak 1 giriş üretir', async () => {
     await Promise.all(
-      Array.from({ length: 50 }, (_, i) => sendLocation('u1', INSIDE, i)),
+      Array.from({ length: 50 }, (_, i) => sendLocation(app, 'u1', INSIDE, i)),
     );
     await waitForQueueDrain(app);
 
-    const logs = await logsFor('u1');
+    const logs = await logsFor(app, 'u1');
     expect(logs).toHaveLength(1);
     expect(logs[0].exitTime).toBeNull();
   });
@@ -123,15 +104,15 @@ describe('Konum → alan giriş/çıkış (e2e)', () => {
     );
 
     expect(results.filter((r) => r.status === 'processed')).toHaveLength(1);
-    const logs = await logsFor('u2');
+    const logs = await logsFor(app, 'u2');
     expect(logs).toHaveLength(1);
   });
 
   it('farklı kullanıcılar birbirini etkilemez', async () => {
     await Promise.all([
-      sendLocation('a', INSIDE, 1),
-      sendLocation('b', INSIDE, 1),
-      sendLocation('c', OUTSIDE, 1),
+      sendLocation(app, 'a', INSIDE, 1),
+      sendLocation(app, 'b', INSIDE, 1),
+      sendLocation(app, 'c', OUTSIDE, 1),
     ]);
     await waitForQueueDrain(app);
 
@@ -160,13 +141,13 @@ describe('Konum → alan giriş/çıkış (e2e)', () => {
     expect(res.body.jobIds).toHaveLength(2);
     await waitForQueueDrain(app);
 
-    expect((await logsFor('u4')).map((l) => [l.entryTime, l.exitTime])).toEqual(
-      [
-        [at(2), null],
-        [at(0), at(1)],
-      ],
-    );
-    expect(await logsFor('u5')).toHaveLength(1);
+    expect(
+      (await logsFor(app, 'u4')).map((l) => [l.entryTime, l.exitTime]),
+    ).toEqual([
+      [at(2), null],
+      [at(0), at(1)],
+    ]);
+    expect(await logsFor(app, 'u5')).toHaveLength(1);
   });
 
   it('aynı kullanıcının kuyrukta birikmiş ayrı işleri sırayla işlenir', async () => {
@@ -183,7 +164,7 @@ describe('Konum → alan giriş/çıkış (e2e)', () => {
     await lane.pause();
     try {
       for (let s = 0; s < 30; s++) {
-        await sendLocation('u7', s % 2 ? INSIDE : OUTSIDE, s);
+        await sendLocation(app, 'u7', s % 2 ? INSIDE : OUTSIDE, s);
       }
       expect(await lane.getWaitingCount()).toBe(30);
     } finally {
@@ -191,7 +172,7 @@ describe('Konum → alan giriş/çıkış (e2e)', () => {
     }
     await waitForQueueDrain(app);
 
-    const logs = await logsFor('u7');
+    const logs = await logsFor(app, 'u7');
     expect(logs).toHaveLength(15);
     expect(logs.at(-1)).toMatchObject({ entryTime: at(1), exitTime: at(2) });
     expect(logs[0]).toMatchObject({ entryTime: at(29), exitTime: null });
@@ -208,7 +189,7 @@ describe('Konum → alan giriş/çıkış (e2e)', () => {
       recordedAt: at(0),
     } as never);
     await waitForQueueDrain(app);
-    expect(await logsFor('u8')).toHaveLength(1);
+    expect(await logsFor(app, 'u8')).toHaveLength(1);
   });
 
   it('toplu istekte bir konum geçersizse hiçbirini almaz', async () => {
@@ -222,7 +203,7 @@ describe('Konum → alan giriş/çıkış (e2e)', () => {
       })
       .expect(400);
     await waitForQueueDrain(app);
-    expect(await logsFor('u6')).toEqual([]);
+    expect(await logsFor(app, 'u6')).toEqual([]);
   });
 
   it('timestamp olmayan konumu 400 ile reddeder', async () => {
@@ -230,6 +211,24 @@ describe('Konum → alan giriş/çıkış (e2e)', () => {
       .post('/locations')
       .send({ userId: 'u1', ...INSIDE })
       .expect(400);
+  });
+
+  it("çözülemeyen ya da saat dilimsiz timestamp'i 500 yerine 400 ile reddeder", async () => {
+    // Sürücü uygulaması 5xx'te noktayı tekrar gönderir; 500 dönseydi kuyruğu kalıcı tıkanırdı.
+    for (const timestamp of [
+      '20260928T100000Z',
+      '2026-W39-1',
+      '2026-02-30T10:00:00Z',
+      '2026-01-01T09:00:00',
+    ]) {
+      const res = await request(app.getHttpServer())
+        .post('/locations')
+        .send({ userId: 'u1', ...INSIDE, timestamp });
+      expect({ timestamp, status: res.status }).toEqual({
+        timestamp,
+        status: 400,
+      });
+    }
   });
 
   it('gelecek tarihli konumu 400 ile reddeder', async () => {

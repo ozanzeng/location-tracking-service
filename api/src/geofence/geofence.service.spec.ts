@@ -19,12 +19,21 @@ const location = {
 
 function setup(state: GeofenceState, transitions: Transition[] = []) {
   const manager = {} as EntityManager;
+  // Tipli mock: depo imzası değişirse typecheck burada da kırılır.
   const repository = {
-    lockUser: vi.fn().mockResolvedValue(undefined),
-    readState: vi.fn().mockResolvedValue(state),
-    relaxCommitDurability: vi.fn().mockResolvedValue(undefined),
-    applyTransitions: vi.fn().mockResolvedValue(transitions),
-  };
+    lockUser: vi
+      .fn<GeofenceRepository['lockUser']>()
+      .mockResolvedValue(undefined),
+    readState: vi
+      .fn<GeofenceRepository['readState']>()
+      .mockResolvedValue(state),
+    relaxCommitDurability: vi
+      .fn<GeofenceRepository['relaxCommitDurability']>()
+      .mockResolvedValue(undefined),
+    applyTransitions: vi
+      .fn<GeofenceRepository['applyTransitions']>()
+      .mockResolvedValue(transitions),
+  } satisfies Partial<GeofenceRepository>;
   const dataSource = {
     transaction: vi.fn((work: (m: EntityManager) => Promise<unknown>) =>
       work(manager),

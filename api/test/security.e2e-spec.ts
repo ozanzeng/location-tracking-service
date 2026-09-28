@@ -2,6 +2,7 @@ import type { INestApplication } from '@nestjs/common';
 import { Redis } from 'ioredis';
 import request from 'supertest';
 import { loadConfig } from '../src/config/configuration.js';
+import { QueueBackpressure } from '../src/locations/queue-backpressure.js';
 import { LocationLanes } from '../src/queue/location-lanes.js';
 import {
   createTestApp,
@@ -208,21 +209,46 @@ describe('Güvenlik ve gözlemlenebilirlik (e2e)', () => {
     });
 
     it('Prometheus formatında HTTP ve konum metriklerini yayınlar', async () => {
+      // Kendi isteklerini üretir: başka testlerin yan etkisine dayanmaz, tek başına da çalışır.
+      await waitForFreshWindow(10_000);
       await waitForQueueDrain(app);
-      const res = await request(app.getHttpServer())
-        .get('/metrics')
-        .expect(200);
-      expect(res.headers['content-type']).toMatch(/text\/plain/);
-      expect(res.text).toMatch(
-        /http_request_duration_seconds_count\{method="POST",route="\/locations",status_code="202"\} \d+/,
-      );
-      expect(res.text).toMatch(/locations_accepted_total \d+/);
-      expect(res.text).toMatch(
-        /locations_rejected_total\{reason="rate_limited"\} \d+/,
-      );
-      expect(res.text).toMatch(
-        /location_job_duration_seconds_count\{result="processed"\} \d+/,
-      );
+      const scrape = async () => {
+        const res = await request(app.getHttpServer())
+          .get('/metrics')
+          .expect(200);
+        expect(res.headers['content-type']).toMatch(/text\/plain/);
+        return res.text;
+      };
+      /** Metrik satırının değeri; seri henüz yoksa 0. */
+      const value = (text: string, series: string) => {
+        const line = text.split('\n').find((l) => l.startsWith(`${series} `));
+        return line ? Number(line.slice(series.length + 1)) : 0;
+      };
+      const series = {
+        http202:
+          'http_request_duration_seconds_count{method="POST",route="/locations",status_code="202"}',
+        accepted: 'locations_accepted_total',
+        rateLimited: 'locations_rejected_total{reason="rate_limited"}',
+        processed: 'location_job_duration_seconds_count{result="processed"}',
+      };
+
+      const before = await scrape();
+      const user = `metrics-${run}`;
+      for (let i = 0; i < 3; i++) {
+        await post('/locations', location(user)).expect(202);
+      }
+      await post('/locations', location(user)).expect(429);
+      await waitForQueueDrain(app);
+      const after = await scrape();
+
+      const delta = (name: keyof typeof series) =>
+        value(after, series[name]) - value(before, series[name]);
+      expect({
+        http202: delta('http202'),
+        accepted: delta('accepted'),
+        rateLimited: delta('rateLimited'),
+        processed: delta('processed'),
+      }).toEqual({ http202: 3, accepted: 3, rateLimited: 1, processed: 3 });
     });
   });
 });
@@ -260,7 +286,10 @@ describe('Kuyruk doluyken backpressure (e2e)', () => {
         points: [],
       })),
     );
-    await new Promise((resolve) => setTimeout(resolve, 150));
+    // Kuyruk derinliği arka planda okunur: sabit süre yerine okumanın eşiği görmesini bekle.
+    await vi.waitFor(() =>
+      expect(() => app.get(QueueBackpressure).assertCapacity(1)).toThrow(),
+    );
 
     const rejected = await request(app.getHttpServer())
       .post('/locations')

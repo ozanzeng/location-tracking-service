@@ -13,6 +13,12 @@ export interface AppConfig {
     statementTimeoutMs: number;
     /** Transaction içinde boşta kalınabilecek en uzun süre (ms); 0 kapatır. Kilit sızmasın. */
     idleInTransactionTimeoutMs: number;
+    /**
+     * Migrate betiği için: API ve worker'ın bağlandığı, sadece gereken yetkileri olan rol
+     * (bkz. database/app-role.ts). Verilmezse rol yönetilmez.
+     */
+    appUser?: string;
+    appPassword?: string;
   };
   redisUrl: string;
   queue: {
@@ -196,6 +202,22 @@ export function loadConfig(
     }
   }
 
+  if (env.DB_APP_USER) {
+    if (!/^[a-z_][a-z0-9_]{0,62}$/.test(env.DB_APP_USER)) {
+      problems.push(
+        `DB_APP_USER küçük harf, rakam ve _ içermeli (verilen: "${env.DB_APP_USER}")`,
+      );
+    }
+    if (!env.DB_APP_PASSWORD) {
+      problems.push('DB_APP_USER verildiyse DB_APP_PASSWORD de verilmeli');
+    }
+    if (env.DB_APP_USER === (env.DB_USER ?? 'geofence')) {
+      problems.push(
+        "DB_APP_USER, migration'ları çalıştıran DB_USER ile aynı olamaz",
+      );
+    }
+  }
+
   oneOf('REALTIME_ENABLED', ['true', 'false']);
   oneOf('LOG_FORMAT', Object.values(LogFormat));
   oneOf('LOG_LEVEL', LOG_LEVELS);
@@ -216,6 +238,8 @@ export function loadConfig(
         0,
         3_600_000,
       ),
+      appUser: env.DB_APP_USER || undefined,
+      appPassword: env.DB_APP_PASSWORD || undefined,
     },
     redisUrl,
     queue: {

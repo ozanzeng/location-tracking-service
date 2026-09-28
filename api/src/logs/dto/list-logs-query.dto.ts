@@ -2,7 +2,6 @@ import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform, Type } from 'class-transformer';
 import {
   IsBoolean,
-  IsISO8601,
   IsInt,
   IsOptional,
   IsString,
@@ -11,6 +10,7 @@ import {
   MaxLength,
   Min,
 } from 'class-validator';
+import { IsApiTimestamp } from '../../common/validation/api-timestamp.js';
 import {
   LOGS_PAGE_DEFAULT,
   LOGS_PAGE_MAX,
@@ -41,17 +41,19 @@ export class ListLogsQueryDto {
   active?: boolean;
 
   @ApiPropertyOptional({
-    description: 'Bu giriş zamanından itibaren (ISO 8601, dahil)',
+    description:
+      'Bu giriş zamanından itibaren (dahil); ISO 8601, saat dilimi zorunlu',
   })
   @IsOptional()
-  @IsISO8601()
+  @IsApiTimestamp()
   from?: string;
 
   @ApiPropertyOptional({
-    description: 'Bu giriş zamanına kadar (ISO 8601, hariç)',
+    description:
+      'Bu giriş zamanına kadar (hariç); ISO 8601, saat dilimi zorunlu',
   })
   @IsOptional()
-  @IsISO8601()
+  @IsApiTimestamp()
   to?: string;
 
   @ApiPropertyOptional({

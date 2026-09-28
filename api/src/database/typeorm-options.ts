@@ -22,8 +22,12 @@ export function typeOrmOptions(config: AppConfig): DataSourceOptions {
     database: config.db.name,
     entities: ENTITIES,
     migrations: MIGRATIONS,
-    // Şema sadece migration'larla yönetilir.
+    // Şema sadece migration'larla yönetilir: TypeORM açılışta eklenti de kurmasın (her
+    // initialize'da CREATE EXTENSION çalıştırıp kullanılmayan uuid-ossp'yi ekliyordu).
+    // postgis ve pgcrypto Init migration'ında; uuid'ler gen_random_uuid() ile.
     synchronize: false,
+    installExtensions: false,
+    uuidExtension: 'pgcrypto',
     extra: {
       max: config.db.poolSize,
       idleTimeoutMillis: 30_000,

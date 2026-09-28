@@ -69,6 +69,25 @@ describe('loadConfig doğrulama', () => {
     ]);
   });
 
+  it('uygulama rolü ayarlarını doğrular', () => {
+    expect(
+      loadConfig({ DB_APP_USER: 'geofence_app', DB_APP_PASSWORD: 'p' }).db,
+    ).toMatchObject({ appUser: 'geofence_app', appPassword: 'p' });
+    expect(problemsFor({ DB_APP_USER: 'geofence_app' })).toEqual([
+      expect.stringMatching(/DB_APP_PASSWORD/),
+    ]);
+    expect(
+      problemsFor({ DB_APP_USER: 'Kötü-İsim', DB_APP_PASSWORD: 'p' }),
+    ).toEqual([expect.stringMatching(/DB_APP_USER/)]);
+    expect(
+      problemsFor({
+        DB_USER: 'geofence',
+        DB_APP_USER: 'geofence',
+        DB_APP_PASSWORD: 'p',
+      }),
+    ).toEqual([expect.stringMatching(/aynı olamaz/)]);
+  });
+
   it('bütün sorunları birlikte raporlar', () => {
     const problems = problemsFor({
       REDIS_URL: 'http://localhost:6379',

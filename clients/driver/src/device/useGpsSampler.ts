@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, type RefObject } from 'react';
+import { useCallback, useEffect, useMemo, useRef, type RefObject } from 'react';
 import type { Area, LocationPoint } from '@shared/api/types';
 import { GPS_INTERVAL_MS, MIN_SAMPLE_GAP_MS } from '../config';
 import type { LatLng } from '../geo/latlng';
@@ -17,6 +17,10 @@ const zonesKey = (p: LatLng, zones: Array<{ id: string; zone: ReturnType<typeof 
  * geofence tetikli konum güncellemesi gibi); bölge bildirimi saniyeler sonra değil, hemen gelir.
  * Giriş kaydını yine sunucu belirler, burası sadece konumu erken gönderir. Sınırda gidip gelen
  * scooter rate limit'e takılmasın diye iki ölçüm arasında en az MIN_SAMPLE_GAP_MS olur.
+ *
+ * Sınır, ekrandaki konum her değiştiğinde (rota oynatma, sürükleme sonu) kontrol edilir;
+ * sürüklerken ekrandaki konum bırakılana kadar değişmediği için dönen `checkBoundary`
+ * sürükleme sırasında da çağrılır.
  */
 export function useGpsSampler(
   active: boolean,
@@ -32,6 +36,14 @@ export function useGpsSampler(
   /** Alan listesinin kimliği: aynı alanlar yeni bir dizide gelirse değişmiş sayılmasın. */
   const areasKey = areas.map((area) => area.id).join(',');
   const lastBoundary = useRef<{ areasKey: string; key: string } | null>(null);
+  /**
+   * Gönderim fonksiyonu ref'ten okunur: kimliği değişse de (ör. bağlantı durumu değişince)
+   * ölçüm baştan başlamaz, fazladan konum gitmez ve 5 saniyelik düzen kaymaz.
+   */
+  const recordRef = useRef(record);
+  useEffect(() => {
+    recordRef.current = record;
+  }, [record]);
 
   useEffect(() => {
     if (!active) return;
@@ -40,7 +52,7 @@ export function useGpsSampler(
     let lastAt = 0;
     const sample = () => {
       lastAt = Date.now();
-      record({ userId: scooterId, ...live.current, timestamp: new Date().toISOString() });
+      recordRef.current({ userId: scooterId, ...live.current, timestamp: new Date().toISOString() });
     };
     const restart = () => {
       clearTimeout(delayed);
@@ -60,13 +72,21 @@ export function useGpsSampler(
       clearTimeout(delayed);
       sampleNow.current = null;
     };
-  }, [active, scooterId, live, record]);
+  }, [active, scooterId, live]);
 
-  useEffect(() => {
-    const key = zonesKey(position, zones);
-    const previous = lastBoundary.current;
-    lastBoundary.current = { areasKey, key };
-    // Alan listesi değiştiyse (yeni alan) karşılaştırma anlamsız: scooter yer değiştirmedi.
-    if (previous && previous.areasKey === areasKey && previous.key !== key) sampleNow.current?.();
-  }, [position, zones, areasKey]);
+  /** Konum bir alan sınırını geçtiyse hemen ölç. */
+  const checkBoundary = useCallback(
+    (p: LatLng) => {
+      const key = zonesKey(p, zones);
+      const previous = lastBoundary.current;
+      lastBoundary.current = { areasKey, key };
+      // Alan listesi değiştiyse (yeni alan) karşılaştırma anlamsız: scooter yer değiştirmedi.
+      if (previous && previous.areasKey === areasKey && previous.key !== key) sampleNow.current?.();
+    },
+    [zones, areasKey],
+  );
+
+  useEffect(() => checkBoundary(position), [position, checkBoundary]);
+
+  return { checkBoundary };
 }

@@ -4,10 +4,13 @@ import {
   Logger,
   type OnApplicationBootstrap,
   type OnApplicationShutdown,
-  type OnModuleDestroy,
 } from '@nestjs/common';
 import { Queue, type JobType } from 'bullmq';
 import { Redis } from 'ioredis';
+import {
+  closeRedis,
+  throttledErrorLogger,
+} from '../common/redis/create-redis.js';
 import { APP_CONFIG, type AppConfig } from '../config/configuration.js';
 import { laneOf, laneQueueName } from './lanes.js';
 import {
@@ -70,7 +73,7 @@ export class LaneLayoutError extends Error {
  */
 @Injectable()
 export class LocationLanes
-  implements OnApplicationBootstrap, OnModuleDestroy, OnApplicationShutdown
+  implements OnApplicationBootstrap, OnApplicationShutdown
 {
   private readonly logger = new Logger(LocationLanes.name);
   /** Kuyruklar ve worker'lar tek bağlantıyı paylaşır (worker'lar ek olarak bekleme bağlantısı açar). */
@@ -102,6 +105,10 @@ export class LocationLanes
       (_, lane) => new Queue<LocationJobData>(laneQueueName(lane), options),
     );
     this.legacy = new Queue(LEGACY_LOCATION_QUEUE, options);
+    // Kesintide 65 kuyruk ve bağlantı aynı seyreltilmiş dinleyiciyi paylaşır.
+    const onError = throttledErrorLogger('kuyruk');
+    this.connection.on('error', onError);
+    for (const queue of this.queues()) queue.on('error', onError);
   }
 
   /**
@@ -176,12 +183,13 @@ export class LocationLanes
     return [...this.lanes, this.legacy];
   }
 
-  async onModuleDestroy(): Promise<void> {
-    await Promise.all(this.queues().map((q) => q.close()));
-  }
-
-  /** Paylaşılan bağlantı en son kapanır: worker'lar kapanırken hâlâ kullanıyor olabilir. */
+  /**
+   * Kuyruklar ve paylaşılan bağlantı en son kapanır: API'de HTTP sunucusu kapanana kadar
+   * gelen konumlar kuyruğa eklenir, worker'da LaneWorkers (onModuleDestroy) aktif işleri
+   * bitirirken bağlantıyı kullanır.
+   */
   async onApplicationShutdown(): Promise<void> {
-    await this.connection.quit().catch(() => undefined);
+    await Promise.all(this.queues().map((q) => q.close()));
+    await closeRedis(this.connection);
   }
 }

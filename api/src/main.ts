@@ -10,7 +10,11 @@ import { setupApp } from './setup-app.js';
 async function bootstrap() {
   // Ayarlar geçersizse Nest ayağa kalkmadan, sorunları listeleyerek çık.
   const config = loadConfigOrExit(process.env, { apiServer: true });
-  const app = await NestFactory.create(AppModule, { logger: createLogger() });
+  const app = await NestFactory.create(AppModule, {
+    logger: createLogger(),
+    // Kapanış başlayınca yeni isteklere 503: istemci (ve load balancer) tekrar dener.
+    return503OnClosing: true,
+  });
   setupApp(app);
   for (const warning of securityWarnings(config.security, process.env)) {
     new Logger('Security').warn(warning);

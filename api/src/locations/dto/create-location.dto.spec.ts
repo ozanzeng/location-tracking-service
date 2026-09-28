@@ -30,4 +30,26 @@ describe('CreateLocationDto', () => {
   ])('%o → %s hatası', (body, property) => {
     expect(errorsFor(body)).toContain(property);
   });
+
+  // Doğrulamadan geçip JS Date ya da Postgres tarafından çözülemeyen biçimler 500 veriyordu.
+  it.each([
+    ['sıkışık biçim', '20260928T100000Z'],
+    ['hafta biçimi', '2026-W39-1'],
+    ['yalnızca yıl', '2026'],
+    ['saat dilimsiz (sunucu saatine göre yorumlanırdı)', '2026-09-28T10:00:00'],
+    ['var olmayan gün', '2026-02-30T10:00:00Z'],
+  ])('timestamp: %s → hata', (_label, timestamp) => {
+    expect(errorsFor({ userId: 'u', lat: 0, lng: 0, timestamp })).toContain(
+      'timestamp',
+    );
+  });
+
+  it.each([
+    '2026-09-28T10:00:00Z',
+    '2026-09-28T10:00:00.123Z',
+    '2026-09-28T13:00:00+03:00',
+    '2024-02-29T10:00Z',
+  ])('timestamp %s kabul edilir', (timestamp) => {
+    expect(errorsFor({ userId: 'u', lat: 0, lng: 0, timestamp })).toEqual([]);
+  });
 });

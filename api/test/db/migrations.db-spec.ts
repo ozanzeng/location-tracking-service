@@ -57,6 +57,14 @@ describe('Migration’lar (boş veritabanı)', () => {
       'areas',
       'user_last_location',
     ]);
+    // Eklentileri sadece migration kurar; TypeORM açılışta kendi eklentisini eklemez.
+    const extensions = await ds.query(
+      `SELECT extname FROM pg_extension WHERE extname <> 'plpgsql' ORDER BY 1`,
+    );
+    expect(extensions.map((e: { extname: string }) => e.extname)).toEqual([
+      'pgcrypto',
+      'postgis',
+    ]);
   });
 
   it('hepsi geri alınabilir (down) ve şema tamamen kalkar', async () => {

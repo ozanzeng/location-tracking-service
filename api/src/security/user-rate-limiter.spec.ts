@@ -27,11 +27,19 @@ const limiter = (limit: number) => {
   });
 };
 
+/** Dakikanın 45. saniyesi: pencere sonuna 15 sn var. */
+const NOW = new Date('2026-09-28T10:00:45Z');
+const WINDOW = Math.floor(NOW.getTime() / 60_000);
+
 describe('UserRateLimiter', () => {
   beforeEach(() => {
     consumeRateLimit.mockReset().mockResolvedValue([]);
     redisCreated = false;
+    // Pencere ve Retry-After saatten hesaplanır; kesin değerleri doğrulamak için saat sabit.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(NOW);
   });
+  afterEach(() => vi.useRealTimers());
 
   it('her kullanıcı için sayaç anahtarı, sınır, TTL ve konum sayısını gönderir', async () => {
     await limiter(3).consume(
@@ -43,8 +51,9 @@ describe('UserRateLimiter', () => {
     const [numKeys, k1, k2, limit, ttl, c1, c2] =
       consumeRateLimit.mock.calls[0];
     expect(numKeys).toBe(2);
-    expect(k1).toMatch(/^geofence:rl:u1:\d+$/);
-    expect(k2).toMatch(/^geofence:rl:u2:\d+$/);
+    // Anahtar dakikalık pencereyi taşır: aynı dakikadaki istekler aynı sayaca yazar.
+    expect(k1).toBe(`geofence:rl:u1:${WINDOW}`);
+    expect(k2).toBe(`geofence:rl:u2:${WINDOW}`);
     expect([limit, ttl, c1, c2]).toEqual([3, 120, 2, 5]);
   });
 
@@ -62,8 +71,8 @@ describe('UserRateLimiter', () => {
       expect(err).toBeInstanceOf(RetryableHttpException);
       const e = err as RetryableHttpException;
       expect(e.getStatus()).toBe(HttpStatus.TOO_MANY_REQUESTS);
-      expect(e.retryAfterSeconds).toBeGreaterThan(0);
-      expect(e.retryAfterSeconds).toBeLessThanOrEqual(60);
+      // Pencere sonuna kalan süre: 60 - 45.
+      expect(e.retryAfterSeconds).toBe(15);
       expect(e.message).toMatch(/u2/);
       expect(e.message).not.toMatch(/u1/);
     }

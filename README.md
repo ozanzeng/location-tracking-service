@@ -54,9 +54,9 @@ flowchart LR
 
 | Endpoint | Açıklama |
 |---|---|
-| `POST /locations` | `{ userId, lat, lng, timestamp }`. Hepsi zorunlu, `timestamp` ISO 8601. Kuyruğa alınır, `202 { jobId, recordedAt }` döner (`jobId` "şerit:iş" biçiminde, ör. `17:123`). |
+| `POST /locations` | `{ userId, lat, lng, timestamp }`. Hepsi zorunlu. `timestamp` ISO 8601, saat dilimi zorunlu (`2026-09-28T10:00:00Z` ya da `+03:00`). Kuyruğa alınır, `202 { jobId, recordedAt }` döner (`jobId` "şerit:iş" biçiminde, ör. `17:123`). |
 | `POST /locations/batch` | `{ locations: [...] }`, en fazla 100 konum. Bağlantı koptuğunda biriken konumlar için. Doğrulama hepsi-ya-hiçbiri; `202 { accepted, jobIds }`. |
-| `GET /logs` | Alan girişleri, en yeni girişten eskiye. Filtreler: `userId`, `areaId`, `active` (hâlâ içeride mi), `from`/`to` (giriş zamanı aralığı). Sayfalama: `limit`, `cursor`. |
+| `GET /logs` | Alan girişleri, en yeni girişten eskiye. Filtreler: `userId`, `areaId`, `active` (hâlâ içeride mi), `from`/`to` (giriş zamanı aralığı, `timestamp` ile aynı biçim). Sayfalama: `limit`, `cursor`. |
 | `POST /areas` | `{ name, type, geometry }`. Geometri GeoJSON Polygon, koordinatlar `[boylam, enlem]`. |
 | `GET /areas` | Tanımlı alanlar. Opsiyonel `type` filtresi. |
 | `GET /locations/latest` | Son bilinen konumlar (canlı izleme ekranının ilk yüklemesi için). |
@@ -154,6 +154,10 @@ curl -H "$H" 'localhost:3000/logs?userId=scooter-1'
 
 Önceki tasarım tek kuyruk ve kullanıcı başına sıra numarasıyla çalışıyordu: sırası gelmemiş iş erteleniyor, önceki bitince öne alınıyordu. İnceleme iki sorun buldu. Öne alınan iş aslında kuyruğun sonuna düşüyordu ve 30 saniyelik "takıldı" kuralı yavaş ama çalışan işi de geçiyordu. Yük testinde işleme hızı da yarıya inmişti (bkz. Performans).
 
+**Kapanış (deploy, ölçek küçültme) istek kaybettirmez.** Kapanış başlayınca yeni isteklere `503` döner; istemci ve load balancer tekrar dener. Kapanıştan önce gelmiş istekler bitene kadar Redis bağlantıları ve kuyruklar açık kalır; hepsi HTTP sunucusu kapandıktan sonra kapanır. Redis erişilemezse bağlantılar beklemeden kesilir, kapanış asılı kalmaz. Önceden bağlantılar HTTP sunucusundan önce kapanıyor, o anda işlenen konumlar `500` alıyordu; e2e testi kapanış sırasında sürekli istek göndererek bunu doğrular.
+
+**Açılışta Redis yoksa API yine ayağa kalkar.** `/logs`, `/areas` ve `503` dönen `/health` çalışır; canlı yayın aboneliği Redis gelince kendiliğinden kurulur.
+
 **Çöken worker'ın işi başkasına geçer.** Worker işin kilidini 10 saniyede bir yeniler. Süreç çöker ya da Redis'e ulaşamazsa kilit 20 saniye içinde düşer. Diğer worker'lar 5 saniyede bir kilidi düşmüş iş arar ve bulduğunu şeridin önüne geri koyar. Böylece şerit en fazla ~30 saniye bekler ve sıra bozulmaz: iş baştan işlenir, önceden işlenmiş noktaları "eski" sayılıp atlanır (`WORKER_LOCK_MS`, `WORKER_STALLED_CHECK_MS`). e2e testi takılan worker'ı kapatır; işin sırası bozulmadan diğer worker'da bittiğini doğrular.
 
 **Kuyruk dolarsa yük reddedilir (backpressure).** Worker'lar uzun süre yetişemezse kuyruk sınırsız büyüyüp Redis belleğini doldururdu. Tüm şeritlerde bekleyen iş sayısı `QUEUE_MAX_BACKLOG`'u (varsayılan 200.000) aşınca API yeni konumları `503 Retry-After: 5` ile reddeder. Kuyruk derinliği her istekte sorulmaz; saniyede bir arka planda okunur, böylece sıcak yola ek bir Redis çağrısı eklenmez.
@@ -192,7 +196,9 @@ Tasarım kararları, 3 milyon giriş kaydı ve 50 bin kullanıcılı ayrı bir b
 - **CORS:** Production'da varsayılan olarak kapalıdır; `CORS_ORIGINS` ile izin verilen adresler açıkça verilir. Demo istemcileri nginx üzerinden aynı adresten sunulduğu için CORS'a ihtiyaç duymaz.
 - **Demo istemcilerinin anahtarı:** Anahtarı nginx ekler; tarayıcı kodunda görünmez. Ama bu, anahtarı saklamak anlamına gelmez: o nginx'e erişebilen herkes anahtarın yetkisiyle istek atabilir. Bu yüzden herkese açık sürücü uygulamasına sadece `INGEST_API_KEYS` yetkisi verilir. Tam yetkili operasyon uygulaması production'da iç ağda, VPN'de ya da SSO arkasında yayınlanmalıdır.
 - **Demo ortamı production değil:** `docker compose` demo için `NODE_ENV=development` ve herkesin bildiği anahtarlarla çalışır. JSON log ve kapalı CORS gibi production davranışları ise compose'ta açıkça seçildi. Gerçek ortamda `NODE_ENV=production`, `API_KEY` ve `DRIVER_API_KEY` secret olarak verilir; kısa anahtarla API açılmaz.
-- `x-powered-by` başlığı kapalı; doğrulamada tanımsız alan içeren istekler reddedilir.
+- **Veritabanında en az yetki:** API ve worker, sadece yaptıkları işlere yetkili bir rolle bağlanır: `areas` için okuma ve ekleme, `area_logs` ve `user_last_location` için okuma, ekleme ve güncelleme. Silme, tablo boşaltma, şema değiştirme ve sunucuda komut çalıştırma (`COPY ... TO PROGRAM`) yetkisi yoktur. Rolü migrate betiği, şema sahibiyle çalışırken her seferinde oluşturur ya da günceller (`DB_APP_USER`, `DB_APP_PASSWORD`; `api/src/database/app-role.ts`). Şema sahibi superuser'dır ve sadece migrate'te kullanılır. Veritabanı testi, uygulamanın gerçek yazma yolunu bu rolle çalıştırır ve yasak işlemlerin reddedildiğini doğrular.
+- **Girdi doğrulama sınırları:** Zaman damgası saat dilimli olmalı ve var olan bir güne işaret etmeli; JS ile Postgres'in farklı yorumlayabileceği biçimler (`2024`, `2026-W39-1`, `20260928T100000Z`, `2026-02-30`) `400` alır. Önceden bunlar doğrulamadan geçip `500` veriyordu; sürücü uygulaması `5xx`'te tekrar denediği için tek bir böyle nokta cihazın kuyruğunu tıkayabilirdi. Sayfalama imlecindeki zaman ve kimlik de Postgres'e gitmeden doğrulanır.
+- `x-powered-by` başlığı kapalı; doğrulamada tanımsız alan içeren istekler reddedilir. JSON gövde sınırı 512 KB (10 bin köşeli polygon ~220 KB tutar).
 
 ## Gözlemlenebilirlik
 
@@ -202,11 +208,17 @@ Tasarım kararları, 3 milyon giriş kaydı ve 50 bin kullanıcılı ayrı bir b
   - Her ikisinde de Node süreç metrikleri.
   - Worker'ın HTTP API'si olmadığı için metrikleri ayrı bir portta (`WORKER_METRICS_PORT`, varsayılan 9100) yayınlanır.
 - **Loglar:** Production'da tek satır JSON; log toplayıcılar doğrudan ayrıştırabilir. Seviye `LOG_LEVEL` ile, format `LOG_FORMAT=json|pretty` ile ayarlanır. Her istek için erişim logu `verbose` seviyesindedir ve varsayılan olarak kapalıdır, yük altında log hacmi patlamasın diye.
-- **İstek kimliği:** Gelen `x-request-id` korunur, yoksa üretilir ve yanıtta döner. Kimlik işle birlikte kuyruğa gider; worker'daki hata logları aynı kimliği taşır, böylece bir istek API'den worker'a kadar izlenebilir.
+- **İstek kimliği:** Gelen `x-request-id` korunur, yoksa üretilir ve yanıtta döner. Kimlik işle birlikte kuyruğa gider; worker'daki hata logları aynı kimliği taşır, böylece bir istek API'den worker'a kadar izlenebilir. API'de beklenmeyen hatalar (`500`) da istek kimliği, method ve yolla tek satır loglanır; yanıt gövdesinde de kimlik döner.
+- **Redis kesintisinde loglar:** Bağlantı hataları tek satır uyarı olarak loglanır ve 10 saniyede bire seyreltilir (aradaki tekrarlar sayılır). Önceden her yeniden bağlanma denemesi JSON dışı, çok satırlı yığın izi basıyordu.
 
 ## Performans
 
-`loadtest/run.sh` k6'yı compose ağı içinde çalıştırır: 5.000 farklı scooter, 70 saniyede 2.000 istek/sn'ye çıkan yük. Ardından kuyruğun boşalma süresini ölçer.
+`loadtest/run.sh` k6'yı compose ağı içinde çalıştırır: 5.000 farklı scooter, 70 saniyede 2.000 istek/sn'ye çıkan yük. Yük sırasında kuyruk derinliğini izler, ardından kuyruğun boşalmasını bekler ve iki hız yazar:
+
+- **Worker hızı (boşalma):** yük bittiğinde kuyrukta kalan işler / boşalma süresi. Worker'lar o sırada doygun çalıştığı için kapasiteye en yakın sayı budur.
+- **Ortalama işleme:** kabul edilen konum / toplam süre. k6'nın kaç istek gönderebildiğine bağlıdır; kapasite değil, alt sınırdır. 70 saniyelik profil ~100 bin istek gönderdiği için en fazla ~1.400 çıkabilir.
+
+k6 hedef hıza ulaşamazsa (düşen istek) ya da eşikler kalırsa betik bunu da yazar ve k6'nın çıkış koduyla biter.
 
 ```bash
 PEAK_RPS=2000 WORKERS=2 ./loadtest/run.sh
@@ -218,7 +230,7 @@ Ortam: MacBook, Docker VM'e ayrılmış **2 vCPU / 2 GB RAM**. API, worker'lar, 
 
 Güncel sürüm (dayanıklılık değişikliğinden önce), 2 worker, ısınmış sistem:
 
-| Rate limit | İstek | Hata | p50 | p95 | p99 | Ortalama işleme |
+| Rate limit | İstek | Hata | p50 | p95 | p99 | Ortalama işleme (alt sınır) |
 |---|---|---|---|---|---|---|
 | Açık (varsayılan) | 100.304 | %0 | 2,2 ms | 53,7 ms | 154,8 ms | 1.238 konum/sn |
 | Kapalı (`RATE_LIMIT_USER_PER_MIN=0`) | 100.749 | %0 | 1,2 ms | 17,4 ms | 39,4 ms | 1.275 konum/sn |
@@ -230,19 +242,19 @@ Güncel sürüm (dayanıklılık değişikliğinden önce), 2 worker, ısınmı�
 - Gateway zaten rate limit uyguluyorsa `RATE_LIMIT_USER_PER_MIN=0` ile kapatılabilir.
 - Gecikmeyi kaldırmanın bir yolu, sayacı beklemeden yazıp sınırı bir sonraki istekte uygulamak olurdu. Ama bu kısa süreli sınır aşımına izin verir ve karmaşıklık ekler; bu aşamada gerekli görülmedi.
 
-Worker sayısının etkisi (önceki sürümle ölçüldü): 1 worker ile 1.258, 2 worker ile 1.259 konum/sn. Sebebi aşağıda.
+Worker sayısının etkisi (önceki sürümle ölçüldü): 1 worker ile 1.258, 2 worker ile 1.259 konum/sn. Bu ortalama, yük profilinin tavanına (~1.400) yakın olduğu için worker sayısının etkisini göstermeye yetmez; CPU'nun zaten dolu olması da (aşağıda) aynı yönde.
 
-**5 saniyelik gönderim sıklığına göre kapasite:** Kullanıcı başına saniyede 0,2 konum düşüyor. Dayanıklılık değişikliğinden sonraki işleme hızı (~1.130 konum/sn) bu 2 vCPU'luk ortamda sürekli olarak yaklaşık **5.650 eşzamanlı aktif kullanıcıya** karşılık geliyor (önceki ölçümle ~1.270 konum/sn, ~6.300 kullanıcı). Bunun üzerindeki ani yüklerde API hâlâ cevap veriyor, fark kuyrukta birikip sonra eritiliyor.
+**5 saniyelik gönderim sıklığına göre kapasite:** Kullanıcı başına saniyede 0,2 konum düşüyor. Dayanıklılık değişikliğinden sonraki ortalama işleme (~1.130 konum/sn) bu 2 vCPU'luk ortamda **en az ~5.650 eşzamanlı aktif kullanıcıya** karşılık geliyor (önceki ölçümle ~1.270 konum/sn, ~6.300 kullanıcı). Ortalama bir alt sınır olduğu için gerçek kapasite daha yüksek olabilir; bunu uzun süreli sabit yükle (soak) ölçmek sıradaki adım. Bunun üzerindeki ani yüklerde API hâlâ cevap veriyor, fark kuyrukta birikip sonra eritiliyor.
 
 **Kullanıcı şeritleri öncesi ve sonrası (aynı gün, aynı ortam, aynı k6 senaryosu, 2 worker):**
 
-| Tasarım | Kabul edilen konum | Hata | p50 | p95 | p99 | Ortalama işleme |
+| Tasarım | Kabul edilen konum | Düşen istek (k6) | Hata | p50 | p95 | p99 |
 |---|---|---|---|---|---|---|
-| Sıra numarası + erteleme (önceki) | 65.379 | %0,54 | 419 ms | 1,67 sn | 21,9 sn | 594 konum/sn |
-| **Kullanıcı şeritleri** | **77.089** | **%0** | **126 ms** | 1,94 sn | 11,1 sn | **720 konum/sn** |
+| Sıra numarası + erteleme (önceki) | 65.379 | 35.012 | %0,54 | 419 ms | 1,67 sn | 21,9 sn |
+| **Kullanıcı şeritleri** | 77.089 | 23.660 | **%0** | 126 ms | 1,94 sn | 11,1 sn |
 
-- Şeritlerle işleme hızı %21 arttı ve hata kalmadı. Önceki tasarımda 9 iş, önceki işin 30 saniye ilerlemediğine karar verip sırasını beklemeden işlendi (worker logu); şeritlerde böyle bir kural yok.
-- p95 iki tasarımda da benzer ve yukarıdaki tablodan çok kötü. Bu ölçümler sırasında makine başka işlerle meşguldü (yük ortalaması 5–8, açık tarayıcı sekmeleri) ve k6 hedeflenen 2.000 istek/sn'ye ulaşamadı. Bu yüzden karşılaştırma sadece birbirine göre anlamlı; mutlak sayılar için yukarıdaki kontrollü ölçümler geçerli.
+- **Güvenilir olan:** şeritlerle hata kalmadı. Önceki tasarımda 9 iş, önceki işin 30 saniye ilerlemediğine karar verip sırasını beklemeden işlendi (worker logu); şeritlerde böyle bir kural yok.
+- **İşleme hızı bu koşularla karşılaştırılamaz.** İlk sürümde burada "şeritlerle işleme hızı %21 arttı" yazıyordu; skill incelemesi (k6) bunun yanlış olduğunu gösterdi. O sayı "ortalama işleme" idi ve farkın neredeyse tamamı k6'nın ikinci koşuda %18 daha fazla istek gönderebilmesinden geliyordu. İki koşuda da k6 hedef hıza ulaşamadı (on binlerce düşen istek), makine başka işlerle meşguldü (yük ortalaması 5–8). `run.sh` artık worker hızını boşalmadan ayrıca ölçüyor ve düşen istek varsa koşuların karşılaştırılamayacağını yazıyor. Temiz bir karşılaştırma, makine boşken yapılacak.
 - Her tasarım birer kez ölçüldü.
 
 Sonuçların yorumu:
@@ -263,13 +275,13 @@ docker compose up -d --build
 
 | | Birim | E2E | Smoke (veri yazmaz*) |
 |---|---|---|---|
-| **Backend** | 113 test · `api: npm test` | 61 test · `api: npm run test:e2e` | `api: npm run smoke` |
-| **Veritabanı** | 19 test · `api: npm run test:db` | (backend e2e içinde) | `api: npm run smoke:db` |
-| **Frontend** | 74 test · `clients: npm run test:unit` | 18 tarayıcı testi · `clients: npm run test:ui` | `clients: npm run smoke` |
+| **Backend** | 136 test · `api: npm test` | 66 test · `api: npm run test:e2e` | `api: npm run smoke` |
+| **Veritabanı** | 28 test · `api: npm run test:db` | (backend e2e içinde) | `api: npm run smoke:db` |
+| **Frontend** | 77 test · `clients: npm run test:unit` | 18 tarayıcı testi · `clients: npm run test:ui` | `clients: npm run smoke` |
 
 \* Backend smoke testi, gerçek akışı denemek için tek bir sabit test alanı ve benzersiz bir test kullanıcısıyla konum gönderir.
 
-Statik kontroller: `api: npm run lint && npm run typecheck` (testler dahil tam tip kontrolü), `clients: npm run typecheck`.
+Statik kontroller: `api: npm run lint && npm run typecheck` (testler dahil tam tip kontrolü), `clients: npm run typecheck`. Kapsama raporu: `api: npm run test:cov`, `clients: npm run test:cov`; hiç yüklenmeyen dosyalar da rapora dahildir (birim testlerde API ~%56, istemciler ~%51 satır; API'nin controller ve gateway'lerini e2e kapsar, bu rapora girmez).
 
 **Backend birim** (Vitest):
 - Giriş/çıkış akışı (`GeofenceService`): kilit sırası; eski konumun atlanması; commit dayanıklılığının yalnızca giriş/çıkış yokken gevşetilmesi; olayların alan bilgisiyle üretilmesi.
@@ -278,13 +290,16 @@ Statik kontroller: `api: npm run lint && npm run typecheck` (testler dahil tam t
 - Konum doğrulama, gruplama ve saat payı.
 - Kuyruk dolu koruması, kullanıcı başına rate limit, API anahtarı, istek kimliği, `Retry-After`; yerel geliştirmede sürücü anahtarı eksikse açılış uyarısı.
 - Canlı yayın: bozuk ya da biçimi beklenmedik Redis mesajında çökmeme, konum tamponu.
-- Redis erişilemezken alan oluşturmanın yayını beklememesi, kuyruk derinliği okumalarının birikmemesi, worker metrik portu doluyken çökmeme.
+- Redis erişilemezken alan oluşturmanın yayını beklememesi, kuyruk derinliği okumalarının birikmemesi, worker metrik portu doluyken çökmeme; Redis yokken açılışın ve kapanışın beklememesi, bağlantı hatalarının seyreltilmesi.
+- Hata filtresi: `Retry-After`, standart HTTP hataları, bozuk JSON'un `400` kalması, beklenmeyen hatanın istek kimliğiyle loglanması.
+- Zaman damgası ve sayfalama imleci doğrulaması (saat dilimi, var olmayan gün, bigint sınırı).
 - Ayar doğrulama (anahtar kuralları sadece API sunucusunda), GeoJSON doğrulama, cursor.
 
 **Veritabanı** (gerçek PostGIS):
 - **Migration'lar:** boş bir veritabanında hepsi uygulanır, tamamen geri alınır ve tekrar uygulanır. Bu test, `CONCURRENTLY` index'li migration'ın geri alınamadığı bir hatayı yakaladı. Yarıda kalmış bir build'in bıraktığı INVALID index, migration tekrar çalışınca yeniden oluşturulur.
 - **Kısıtlar:** Uygulama hata yapsa bile veritabanı şunları reddeder: geçersiz poligon, yanlış geometri tipi, bilinmeyen alan tipi, çıkışın girişten önce olması, aynı alanda iki açık giriş, var olmayan alana giriş. Alan silinince kayıtları da silinir.
 - **Sorgu planı regresyonları (200 bin kayıtla):** kritik sorgular beklenen index'i kullanır, son konum güncellemeleri %95'ten fazla HOT'tur, `statement_timeout` uzun sorguyu keser.
+- **Uygulama rolü:** API'nin gerçek yazma yolu en az yetkili rolle çalışır; silme, boşaltma, şema değiştirme ve `COPY ... TO PROGRAM` reddedilir. Migration'lar kullanılmayan eklenti bırakmaz.
 - **Veritabanı smoke:** bağlantı, PostGIS, bekleyen migration, gerekli ve geçerli (INVALID olmayan) index'ler, HOT ayarı, zaman aşımları, `synchronous_commit`.
 
 **Backend e2e** (gerçek PostGIS + Redis, ayrı test veritabanı ve kuyruk öneki):
@@ -293,10 +308,11 @@ Statik kontroller: `api: npm run lint && npm run typecheck` (testler dahil tam t
 - Toplu istek sırası, sayfalama ve filtreler.
 - Kullanıcı şeritleri (gerçek Redis): iki worker aynı şeridi dinlerken işlerin üst üste binmemesi ve geliş sırası; denemeleri tükenen işin şeridi tıkamaması; çöken worker'ın işinin sırası bozulmadan diğer worker'a geçmesi; şerit sayısı uyuşmazlığı.
 - Birikmiş kuyrukta aynı kullanıcının işlerinin uçtan uca sırayla işlenmesi; şeritlerden önceki kuyrukta kalmış eski biçimdeki işler.
+- Kapanış sırasında sürekli gelen isteklerin hiçbirinin `500` almaması; `500` yerine `400`: çözülemeyen zaman damgaları, geçersiz imleç, bozuk JSON; `413`: gövde sınırı; 10 bin köşeli polygon kabul, fazlası açıklamalı `400`.
 - API anahtarı ve sürücü anahtarının sınırları (HTTP ve WebSocket; sürücü bağlantısının tek kullanıcı odasında tutulması), rate limit (sınırdan büyük toplu istek, reddin kotadan düşmemesi, toplu istekte bir kullanıcı sınırdaysa diğerlerinin sayacına dokunulmaması; testler dakikalık pencerenin sonuna denk gelmesin diye pencerede en az 10 sn kalınca başlar), `503` backpressure, metrikler, canlı yayın ve alan duyurusu, ping'e cevap vermeyen bağlantının kapatılması.
 
 **Frontend birim** (Vitest, hook'lar için jsdom):
-- **Konum ölçümü (`useGpsSampler`):** 5 saniyede bir ölçüm; alana girince ve çıkınca beklemeden ölçüm, ardından düzenli ölçümün oradan devam etmesi; aynı alanlar içinde hareketin ve yeni tanımlanan alanın ek ölçüm yapmaması; sınırda gidip gelince saniyede en fazla bir ölçüm.
+- **Konum ölçümü (`useGpsSampler`):** 5 saniyede bir ölçüm; alana girince ve çıkınca beklemeden ölçüm, ardından düzenli ölçümün oradan devam etmesi; aynı alanlar içinde hareketin ve yeni tanımlanan alanın ek ölçüm yapmaması; sınırda gidip gelince saniyede en fazla bir ölçüm; sürüklerken (bırakmadan) sınır geçişi; bağlantı durumu değişince ölçümün baştan başlamaması.
 - **Gönderim kuyruğu (`useOutbox`):** kaydedilen konumun zamanlayıcıyı beklemeden gönderilmesi, çevrimdışı birikim ve tek toplu istek, 100'lük gruplar, `429`'da `Retry-After` kadar bekleme, ağ hatasında noktaları kaybetmeme, `401`'de anahtar sorununu ne yapılacağıyla gösterme. Toplu istek tek hatalı nokta yüzünden `400` alırsa grup ikiye bölünür; sadece o nokta atılır. Ardışık hatalı noktalar (ör. saati ileri cihaz) baştan bölme yapılmadan, her biri tek istekle atılır. Gönderim sürerken kuyruk dolup baştan kırpılsa bile gönderilmemiş noktalar silinmez.
 - **Giriş kayıtları (`useLogs`):** eski filtrenin geç gelen yanıtı ya da önceki sonraki-sayfa isteği yeni sonucu ezmez.
 - **Canlı sayaçlar:** "hizmet bölgesi dışında" sayısı haritadaki gri noktalarla aynı kurala dayanır.
@@ -342,7 +358,7 @@ Sürücü ──konum──▶ API ──kuyruk──▶ Worker ──giriş/ç�
 
 **Sürücü uygulaması** (`clients/driver`, :8081): Tek bir scooter'ın telefonu gibi davranır.
 - "Sürüşü başlat" ile o anki konum **5 saniyede bir** ölçülür ve gönderilir. Scooter haritada sürüklenir ya da çizilen bir rota oynatılır.
-- **Bölge sınırında beklemeden gönderim.** Scooter bir alana girer ya da çıkarsa konum 5 saniyeyi beklemeden hemen ölçülür ve gönderilir; telefonlardaki geofence tetikli konum güncellemesi gibi. Giriş kaydını yine sunucu belirler, uygulama sadece konumu erken gönderir. Böylece levha, scooter bölgeye girdikten ~0,2 sn sonra görünür; önceden 5 saniyelik ölçüm aralığı yüzünden 3,5–5 sn sürüyordu (tarayıcıda ölçüldü). Sınırda gidip gelen scooter rate limit'e takılmasın diye iki ölçüm arasında en az 1 saniye olur.
+- **Bölge sınırında beklemeden gönderim.** Scooter bir alana girer ya da çıkarsa (rota oynatırken ya da sürüklenirken, bırakmayı beklemeden) konum 5 saniyeyi beklemeden hemen ölçülür ve gönderilir; telefonlardaki geofence tetikli konum güncellemesi gibi. Giriş kaydını yine sunucu belirler, uygulama sadece konumu erken gönderir. Böylece levha, scooter bölgeye girdikten ~0,2 sn sonra görünür; önceden 5 saniyelik ölçüm aralığı yüzünden 3,5–5 sn sürüyordu (tarayıcıda ölçüldü). Sınırda gidip gelen scooter rate limit'e takılmasın diye iki ölçüm arasında en az 1 saniye olur.
 - **Hareket sadece yollarda.** Rota duraklarına tıklanınca, tıklanan yer en yakın yola yapıştırılır. 60 m içinde yol yoksa (arsa ortası, deniz) tıklama yok sayılır ve imleç "izin yok"a döner. Fare gezerken yoldaki hedef nokta önizlenir. Bir durağa (ya da aynı arsaya) tekrar tıklamak o durağı siler; üzerine gelinen durak kırmızıya döner ve rota kalan duraklara göre yeniden hesaplanır. Duraklar arasındaki rota yol ağı üzerinden en kısa yol olarak hesaplanır (A*); scooter köşelerden döner, binaların içinden geçmez. Sürüklenen scooter da yol üzerinde kayar.
 - **Bölge kuralları:**
   - **Sürüş yasak bölgeye girilemez.** Rota bu bölgelerin içinden geçmez, gerekirse etrafından dolaşır. Hedef bölgenin içindeyse durak bölgenin sınırına konur; yolun bölgeye girdiği noktalardan hem yakın hem tıklanan yere yakın olan seçilir. Bölge içine gelen önizleme kırmızı görünür. Sürüklenen scooter bölgeye girmeden önceki son yol noktasında kalır.
@@ -456,6 +472,8 @@ Projeye şu skill'ler kuruldu (`.claude/skills/`, sürümler ve içerik özetler
 - `nestjs-best-practices`: NestJS modül, bağımlılık enjeksiyonu, güvenlik ve performans kuralları
 - `vitest`: backend ve frontend testlerinin çatısı Vitest için
 - `k6`: yük testi betikleri (`loadtest/`); betikleri tam yükle değil `k6 inspect` ile doğrular
+
+Proje bu skill'lerle bir kez baştan sona gözden geçirildi (Postgres, NestJS, Vitest, k6, React). Doğrulanan bulgular düzeltildi: `500` dönen zaman damgaları, kapanışta kaybedilen istekler, superuser DB bağlantısı, sürücü uygulamasındaki iki hata, README'deki yanlış bir performans iddiası ve zayıf testler (ayrıntılar commit geçmişinde).
 
 Skill'ler Claude'un bu projede tam yetkiyle izlediği talimatlardır. Kurulmadan önce kaynakları kontrol edildi: kurulum sayısı, depo yıldızı, resmi kaynak olup olmadığı ve içeriği (hepsi Markdown doküman; k6'da çalıştırılmayan örnek betikler var). `nestjs-best-practices` topluluk skill'idir; resmi bir NestJS skill'i bulunamadı.
 

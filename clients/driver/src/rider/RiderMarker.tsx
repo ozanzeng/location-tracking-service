@@ -23,6 +23,8 @@ interface Props {
   restrictions: Restrictions | null;
   /** Sürüklerken güncellenen canlı konum (GPS örnekleyici buradan okur). */
   live: RefObject<LatLng>;
+  /** Sürüklerken canlı konum her değiştiğinde (bölge sınırı kontrolü için). */
+  onDrag: (p: LatLng) => void;
   onDragEnd: () => void;
 }
 
@@ -30,7 +32,7 @@ interface Props {
  * Scooter imleci. Sürüklenirken yol üzerinde kayar (en yakın yola yapışır) ve sürüş yasak
  * bölgeye girmez; bölgeye girmeden önceki son yol noktasında kalır.
  */
-export function RiderMarker({ position, zone, draggable, roads, restrictions, live, onDragEnd }: Props) {
+export function RiderMarker({ position, zone, draggable, roads, restrictions, live, onDrag, onDragEnd }: Props) {
   const markerRef = useRef<L.Marker | null>(null);
   // Sürükleme işleyicileri güncel değerleri ref'ten okur; her render'da yeniden bağlanmaz.
   const latest = useRef({ zone, roads, restrictions });
@@ -56,15 +58,16 @@ export function RiderMarker({ position, zone, draggable, roads, restrictions, li
         const { roads: network, restrictions: r } = latest.current;
         if (!network) {
           live.current = marker.getLatLng();
-          return;
+        } else {
+          const snap = network.snap(marker.getLatLng(), SNAP_METERS);
+          if (snap && r && network.zoneAt(snap.point, r) >= 0) {
+            marker.setLatLng(live.current);
+          } else if (snap) {
+            live.current = snap.point;
+            marker.setLatLng(snap.point);
+          }
         }
-        const snap = network.snap(marker.getLatLng(), SNAP_METERS);
-        if (snap && r && network.zoneAt(snap.point, r) >= 0) {
-          marker.setLatLng(live.current);
-        } else if (snap) {
-          live.current = snap.point;
-          marker.setLatLng(snap.point);
-        }
+        onDrag(live.current);
       },
       dragend: () => {
         // Yakında yol yoksa son yol noktasında kalır.
@@ -72,7 +75,7 @@ export function RiderMarker({ position, zone, draggable, roads, restrictions, li
         onDragEnd();
       },
     }),
-    [live, onDragEnd],
+    [live, onDrag, onDragEnd],
   );
 
   return (

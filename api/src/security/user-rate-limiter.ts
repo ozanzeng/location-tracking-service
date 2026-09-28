@@ -2,11 +2,11 @@ import {
   HttpStatus,
   Inject,
   Injectable,
-  type OnModuleDestroy,
+  type OnApplicationShutdown,
 } from '@nestjs/common';
 import type { Redis } from 'ioredis';
 import { APP_CONFIG, type AppConfig } from '../config/configuration.js';
-import { createRedis } from '../common/redis/create-redis.js';
+import { closeRedis, createRedis } from '../common/redis/create-redis.js';
 import { RetryableHttpException } from '../common/http/retryable.exception.js';
 import { RATE_LIMIT_WINDOW_SECONDS as WINDOW_SECONDS } from '../config/limits.js';
 import { locationsRejected } from '../metrics/metrics.js';
@@ -54,7 +54,7 @@ type RateLimitRedis = Redis & {
  * sınır - 1 + toplu istek boyutu kadar konum gönderebilir.
  */
 @Injectable()
-export class UserRateLimiter implements OnModuleDestroy {
+export class UserRateLimiter implements OnApplicationShutdown {
   private readonly redis: RateLimitRedis | null;
   private readonly limit: number;
   private readonly prefix: string;
@@ -64,7 +64,10 @@ export class UserRateLimiter implements OnModuleDestroy {
     this.prefix = `${config.queue.prefix}:rl`;
     this.redis = null;
     if (this.limit > 0) {
-      const redis = createRedis(config.redisUrl, { failFast: true });
+      const redis = createRedis(config.redisUrl, {
+        failFast: true,
+        name: 'rate limit',
+      });
       redis.defineCommand('consumeRateLimit', { lua: CONSUME_SCRIPT });
       this.redis = redis as RateLimitRedis;
     }
@@ -98,7 +101,11 @@ export class UserRateLimiter implements OnModuleDestroy {
     }
   }
 
-  async onModuleDestroy(): Promise<void> {
-    await this.redis?.quit();
+  /**
+   * HTTP sunucusu ve soketler kapandıktan sonra (Nest: onModuleDestroy → sunucu kapanışı →
+   * onApplicationShutdown): kapanırken işlenmekte olan istekler bağlantıyı hâlâ kullanır.
+   */
+  async onApplicationShutdown(): Promise<void> {
+    if (this.redis) await closeRedis(this.redis);
   }
 }

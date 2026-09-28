@@ -1,6 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
 import {
-  IsISO8601,
   IsNotEmpty,
   IsNumber,
   IsString,
@@ -9,6 +8,7 @@ import {
   MaxLength,
   Min,
 } from 'class-validator';
+import { IsApiTimestamp } from '../../common/validation/api-timestamp.js';
 import { USER_ID_MAX_LENGTH, USER_ID_PATTERN } from '../../config/limits.js';
 
 export class CreateLocationDto {
@@ -35,9 +35,9 @@ export class CreateLocationDto {
 
   @ApiProperty({
     description:
-      'Konumun cihazda ölçüldüğü an (ISO 8601). Giriş zamanı olarak bu değer kaydedilir.',
+      'Konumun cihazda ölçüldüğü an: ISO 8601, saat dilimi zorunlu (Z ya da ±hh:mm). Giriş zamanı olarak bu değer kaydedilir.',
     example: '2026-09-25T10:00:00.000Z',
   })
-  @IsISO8601({ strict: true })
+  @IsApiTimestamp()
   timestamp: string;
 }
