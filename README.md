@@ -19,6 +19,8 @@ Yanında servisle veri alışverişi yapan iki istemci de var (case kapsamı dı
 
 ## Hızlı başlangıç
 
+**Gereksinimler:** Docker ve Docker Compose v2 (Docker Desktop yeterli; Apple Silicon ve Intel/AMD). API, worker'lar, veritabanı ve iki arayüz Docker'da derlenip çalışır; bilgisayarda Node kurulu olması gerekmez. Sadece örnek alanları ekleyen `seed.mjs` için Node.js 18+ gerekir (bağımlılık kurulmaz). İlk derleme internet bağlantısıyla birkaç dakika sürer. Kullanılan portlar: 3000 (API), 8080 (operasyon), 8081 (sürücü), 5444 (Postgres), 6390 (Redis); biri doluysa `.env` ile değiştirilir (`API_PORT`, `OPS_PORT`, `DRIVER_PORT`, `POSTGRES_PORT`, `REDIS_PORT`).
+
 ```bash
 docker compose up -d --build        # postgis, redis, migrate, api, 2 worker, log-retention, ops, driver
 node api/scripts/seed.mjs           # Kadıköy/Moda çevresinde 10 örnek alan (bağımlılık gerektirmez)
