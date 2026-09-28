@@ -26,8 +26,26 @@ node api/scripts/seed.mjs           # Kadıköy/Moda çevresinde 10 örnek alan 
 
 Migration kurulumda 5 scooter ekler (`scooter-01` … `scooter-05`) ve demo yöneticisini oluşturur.
 
+### Giriş bilgileri (yerel demo)
+
+| Nerede | Kullanıcı adı | Şifre / anahtar | Not |
+|---|---|---|---|
+| **Operasyon paneli** (http://localhost:8080) | `admin` | `admin-demo-sifresi` | Yönetici. Migrate adımında oluşturulur. |
+| Sürücü uygulaması (http://localhost:8081) | kendiniz belirlersiniz | en az 8 karakter | Giriş ekranında "Üye ol". |
+| API anahtarı (Swagger, betikler, `curl`) | — | `dev-api-key` | `x-api-key` başlığı. Swagger'da "Authorize" → `api-key`. |
+| Swagger'da yönetici / sürücü | yukarıdakiler | yukarıdakiler | `POST /auth/admin/login` ya da `/auth/login`; dönen token "Authorize" → `admin` ya da `rider`. |
+| Grafana (http://localhost:3001, `observability` profili) | `admin` | `admin` | Panolar girişsiz de görüntülenir; ayar değiştirmek için giriş. |
+| Postgres (`localhost:5444`, veritabanı `geofence`) | `geofence` | `geofence` | Şema sahibi (migration). API ve worker `geofence_app` / `geofence_app` ile bağlanır. |
+
+Bunlar sadece yerel demo içindir ve herkesçe bilinir. Değiştirmek için proje kökünde `.env` dosyasına yazılıp `docker compose up -d` çalıştırılır: `ADMIN_USERNAME`, `ADMIN_PASSWORD` (en az 12 karakter), `API_KEY`, `GRAFANA_ADMIN_PASSWORD`, `DB_APP_PASSWORD`.
+- **Var olan yöneticinin şifresi `.env` ile değişmez** (hesap varsa migrate şifreye dokunmaz). Şifre değiştirmek ya da yeni yönetici eklemek için:
+  ```bash
+  docker compose run --rm -e ADMIN_PASSWORD='yeni-guclu-sifre' migrate node dist/admins/admin-cli.js admin
+  ```
+- Production'da (`NODE_ENV=production`) demo yönetici şifresi ve 16 karakterden kısa API anahtarı kabul edilmez; servis açılmaz.
+
 - API ve Swagger: http://localhost:3000/docs. Yerel demo anahtarı: `dev-api-key` (betikler, mobil backend, filo sistemi). Sürücü uç noktaları için önce `POST /auth/register` ya da `/auth/login`, yönetici için `POST /auth/admin/login`; dönen token Swagger'da "Authorize" → `rider` ya da `admin` alanına girilir.
-- Operasyon uygulaması: http://localhost:8080. Demo yöneticisi: kullanıcı adı `admin`, şifre `admin-demo-sifresi` (`ADMIN_USERNAME`, `ADMIN_PASSWORD` ile değişir; production'da demo şifresi kabul edilmez).
+- Operasyon uygulaması: http://localhost:8080 (giriş bilgileri yukarıdaki tabloda).
 - Sürücü uygulaması: http://localhost:8081. Üye olun, bir scooter seçin ve "Sürüşü başlat" deyin; operasyon uygulamasını yanında açık tutun.
 - Sağlık: http://localhost:3000/health (ayrıntılı), `/health/live`, `/health/ready`
 - Metrikler: http://localhost:3000/metrics (API), worker'larda `:9100/metrics`
