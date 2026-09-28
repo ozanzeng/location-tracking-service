@@ -3,7 +3,8 @@ import { api } from '@shared/api/client';
 import { EventType, type AreaEvent, type LogEntry } from '@shared/api/types';
 import { SocketEvent } from '@shared/realtime/events';
 import { getSocket } from '@shared/realtime/socket';
-import { toLogQuery, type LogFilters } from './logFilters';
+import { toLogQuery } from './logFilters';
+import type { LogFilters } from './logs.types';
 
 /**
  * GET /logs ile sayfalı giriş kayıtları. Liste açıkken gelen yeni girişler sayılır;

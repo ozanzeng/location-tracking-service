@@ -10,5 +10,6 @@ import { RidersService } from './riders.service.js';
   imports: [TypeOrmModule.forFeature([Rider]), SecurityModule],
   controllers: [AuthController],
   providers: [RidersService, LoginThrottle],
+  exports: [LoginThrottle],
 })
 export class RidersModule {}

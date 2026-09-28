@@ -1,7 +1,6 @@
 import type { AreaType } from '@shared/api/types';
 import { isOutsideService } from './scooterColor';
-
-export type Counts = { total: number; outside: number } & Partial<Record<AreaType, number>>;
+import type { Counts } from './live.types';
 
 /** Anlık sayaçlar: toplam, bölge tipine göre ve hizmet bölgesi dışında (haritadaki gri). */
 export function countScooters(scooters: Iterable<{ types: AreaType[] }>): Counts {

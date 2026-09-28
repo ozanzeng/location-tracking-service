@@ -1,0 +1,94 @@
+# Alarm kuralları. Eşikler case'in 5 sn'lik gönderim aralığına ve k6 ölçümlerine göre
+# (README, "Performans"); gerçek trafikte ilk haftadan sonra gözden geçirilmeli.
+groups:
+  - name: konum-servisi
+    rules:
+      - alert: ApiDown
+        expr: up{job="api"} == 0
+        for: 1m
+        labels: { severity: critical }
+        annotations:
+          summary: "API kopyası {{ $labels.instance }} cevap vermiyor"
+          description: "Metrikler 1 dakikadır kazınamıyor. Konumlar kabul edilmiyor olabilir."
+
+      - alert: WorkerDown
+        expr: up{job="worker"} == 0
+        for: 1m
+        labels: { severity: critical }
+        annotations:
+          summary: "Worker {{ $labels.instance }} cevap vermiyor"
+          description: "Konumlar kuyrukta birikir; giriş kayıtları gecikir."
+
+      - alert: NoWorkers
+        expr: absent(up{job="worker"} == 1)
+        for: 1m
+        labels: { severity: critical }
+        annotations:
+          summary: "Hiç çalışan worker yok"
+          description: "Kuyruk işlenmiyor: giriş/çıkış kayıtları oluşmuyor."
+
+      - alert: LocationProcessingLag
+        expr: histogram_quantile(0.95, sum by (le) (rate(location_job_lag_seconds_bucket[5m]))) > 30
+        for: 2m
+        labels: { severity: warning }
+        annotations:
+          summary: "Konumlar kuyrukta 30 sn'den fazla bekliyor (p95: {{ $value | humanizeDuration }})"
+          description: "Worker'lar yüke yetişmiyor. Worker sayısını artırın ya da veritabanını kontrol edin. Sinyal kaybı taraması bu gecikmeyi pay olarak ekler."
+
+      - alert: QueueBacklogHigh
+        expr: max(location_queue_backlog) > 50000
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "Kuyrukta {{ $value }} konum bekliyor"
+          description: "QUEUE_MAX_BACKLOG'a (varsayılan 200 bin) yaklaşınca API yeni konumları 503 ile reddetmeye başlar."
+
+      - alert: LocationsRejectedBackpressure
+        expr: sum(rate(locations_rejected_total{reason="backpressure"}[5m])) > 0
+        for: 1m
+        labels: { severity: critical }
+        annotations:
+          summary: "Kuyruk dolu: konumlar 503 ile reddediliyor"
+          description: "Cihazlar Retry-After kadar bekleyip tekrar dener; kalıcıysa worker kapasitesi yetersiz."
+
+      - alert: LaneStuck
+        expr: max(location_lane_backlog_max) > 1000
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "Bir şeritte {{ $value }} iş birikti"
+          description: "Tek bir şeritte yavaş ya da takılan bir iş var; o şeritteki kullanıcıların konumları gecikiyor."
+
+      - alert: LocationJobFailures
+        expr: sum(increase(location_job_failures_total[10m])) > 0
+        for: 0m
+        labels: { severity: warning }
+        annotations:
+          summary: "Denemeleri tükenen konum işleri var ({{ $value }} / 10 dk)"
+          description: "Kalıcı hata (veri ya da kod). Worker loglarında istek kimliğiyle aranabilir."
+
+      - alert: HttpErrorRate
+        expr: |
+          sum(rate(http_request_duration_seconds_count{status_code=~"5.."}[5m]))
+            / clamp_min(sum(rate(http_request_duration_seconds_count[5m])), 1e-9) > 0.01
+        for: 5m
+        labels: { severity: critical }
+        annotations:
+          summary: "İsteklerin {{ $value | humanizePercentage }} kadarı 5xx alıyor"
+          description: "503 (backpressure, kapanış) ve 500'leri içerir; route etiketine bakın."
+
+      - alert: HttpLatencyHigh
+        expr: histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket[5m]))) > 0.5
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "HTTP p95 {{ $value | humanizeDuration }}"
+          description: "Konum kabulü normalde milisaniyeler sürer (Redis'e yazma). Redis gecikmesini kontrol edin."
+
+      - alert: MassSignalLoss
+        expr: sum(increase(area_visits_signal_lost_total[5m])) > 100
+        for: 0m
+        labels: { severity: warning }
+        annotations:
+          summary: "5 dakikada {{ $value }} giriş sinyal kaybıyla kapandı"
+          description: "Çok sayıda scooter aynı anda susmuş: hücresel kesinti ya da istemci sürümü sorunu olabilir."

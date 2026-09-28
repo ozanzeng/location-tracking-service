@@ -4,26 +4,19 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import type { Response } from 'express';
 import { DataSource } from 'typeorm';
 import { LocationLanes } from '../queue/location-lanes.js';
-import { DependencyStatus, HealthStatus } from './health-status.enum.js';
 import { Public } from '../security/public.decorator.js';
+import { allUp, checkDependencies, withTimeout } from './dependency-check.js';
+import { HealthStatus } from './health-status.enum.js';
+import { JOB_STATES } from './health.constants.js';
 
-/** Redis düşükken BullMQ komutları yeniden bağlanmayı bekler; health asılı kalmasın. */
-const withTimeout = <T>(promise: Promise<T>, ms = 2000): Promise<T> =>
-  Promise.race([
-    promise,
-    new Promise<T>((_, reject) =>
-      setTimeout(() => reject(new Error('timeout')), ms),
-    ),
-  ]);
-
-const JOB_STATES = [
-  'waiting',
-  'active',
-  'delayed',
-  'failed',
-  'completed',
-] as const;
-
+/**
+ * Üç kontrol, üç ayrı soru:
+ * - /health/live (liveness): süreç cevap veriyor mu? Bağımlılıklara bakmaz: veritabanı kısa
+ *   süre düştüğünde orkestratör bütün API'leri yeniden başlatıp sorunu büyütmesin.
+ * - /health/ready (readiness): trafik alabilir mi? Veritabanı ve Redis'e ulaşılamıyorsa ya da
+ *   kapanış başladıysa 503; load balancer bu instance'a istek göndermez.
+ * - /health: operasyon ekranı için ayrıntılı durum (kuyruk sayıları dahil).
+ */
 @ApiTags('health')
 @Public()
 @Controller('health')
@@ -34,26 +27,38 @@ export class HealthController {
   ) {}
 
   @Get()
-  @ApiOperation({ summary: 'DB, Redis ve kuyruk durumu' })
+  @ApiOperation({ summary: 'DB, Redis ve kuyruk durumu (operasyon ekranı)' })
   async health(@Res({ passthrough: true }) res: Response) {
-    const [database, queue] = await Promise.all([
-      withTimeout(this.dataSource.query('SELECT 1')).then(
-        () => DependencyStatus.UP,
-        () => DependencyStatus.DOWN,
-      ),
-      // Sayımlar Redis'ten okunur (tüm şeritlerin toplamı); başarısızsa Redis erişilemez demektir.
+    const [deps, queue] = await Promise.all([
+      checkDependencies(this.dataSource, this.lanes),
+      // Sayımlar Redis'ten okunur (tüm şeritlerin toplamı).
       withTimeout(this.lanes.counts(...JOB_STATES)).catch(() => null),
     ]);
-    const redis = queue ? DependencyStatus.UP : DependencyStatus.DOWN;
-
-    const ok =
-      database === DependencyStatus.UP && redis === DependencyStatus.UP;
+    const ok = allUp(deps);
     res.status(ok ? 200 : 503);
     return {
       status: ok ? HealthStatus.OK : HealthStatus.ERROR,
-      database,
-      redis,
+      ...deps,
       queue,
     };
+  }
+
+  @Get('live')
+  @ApiOperation({
+    summary: 'Liveness: süreç cevap veriyor (bağımlılıklara bakmaz)',
+  })
+  live() {
+    return { status: HealthStatus.OK };
+  }
+
+  @Get('ready')
+  @ApiOperation({
+    summary: 'Readiness: veritabanı ve Redis erişilebilir, trafik alınabilir',
+  })
+  async ready(@Res({ passthrough: true }) res: Response) {
+    const deps = await checkDependencies(this.dataSource, this.lanes);
+    const ok = allUp(deps);
+    res.status(ok ? 200 : 503);
+    return { status: ok ? HealthStatus.OK : HealthStatus.ERROR, ...deps };
   }
 }

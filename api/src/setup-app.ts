@@ -4,10 +4,11 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AppExceptionFilter } from './common/http/app-exception.filter.js';
 import { corsOrigin } from './config/cors.js';
 import { CorsIoAdapter } from './realtime/cors-io.adapter.js';
-import { APP_CONFIG, type AppConfig } from './config/configuration.js';
 import { JSON_BODY_LIMIT } from './config/limits.js';
 import { collectProcessMetrics } from './metrics/metrics.js';
-import { API_KEY_HEADER } from './security/auth.guard.js';
+import { API_KEY_HEADER } from './security/security.constants.js';
+import type { AppConfig } from './config/configuration.types.js';
+import { APP_CONFIG } from './config/config.constants.js';
 
 /** main.ts ve e2e testleri aynı ayarları kullansın diye ortak kurulum. */
 export function setupApp(app: INestApplication): void {
@@ -51,6 +52,8 @@ export function setupApp(app: INestApplication): void {
       )
       // Sürücü oturumu: POST /auth/login'in döndürdüğü token.
       .addBearerAuth({ type: 'http', scheme: 'bearer' }, 'rider')
+      // Yönetici oturumu: POST /auth/admin/login'in döndürdüğü token (operasyon paneli).
+      .addBearerAuth({ type: 'http', scheme: 'bearer' }, 'admin')
       .build(),
   );
   SwaggerModule.setup('docs', app, document);

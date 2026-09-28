@@ -10,13 +10,14 @@ import {
 } from '@nestjs/swagger';
 import { RidersOnly } from '../security/access.decorator.js';
 import { CurrentRider } from '../security/current-rider.decorator.js';
-import type { RiderPrincipal } from '../security/principal.js';
+import { EndRentalDto } from './dto/end-rental.dto.js';
 import { RentScooterDto } from './dto/rent-scooter.dto.js';
 import {
   CurrentRentalResponseDto,
   RentalResponseDto,
 } from './dto/rental-response.dto.js';
 import { RentalsService } from './rentals.service.js';
+import type { RiderPrincipal } from '../security/security.types.js';
 
 /** Sürücünün scooter alıp bırakması; sadece sürücü oturumuyla. */
 @ApiTags('rentals')
@@ -53,10 +54,20 @@ export class RentalsController {
 
   @Post('current/end')
   @HttpCode(200)
-  @ApiOperation({ summary: 'Sürüşü bitir, scooter boşa çıkar' })
+  @ApiOperation({
+    summary: 'Sürüşü bitir, scooter boşa çıkar',
+    description:
+      'Sadece park alanında (park yasak bölge dışında) biter. Gövdede cihazın o anki konumu gönderilebilir; yoksa scooterın sunucudaki son konumu kullanılır.',
+  })
   @ApiOkResponse({ type: RentalResponseDto })
   @ApiNotFoundResponse({ description: 'Aktif kiralama yok' })
-  end(@CurrentRider() rider: RiderPrincipal): Promise<RentalResponseDto> {
-    return this.rentals.end(rider);
+  @ApiConflictResponse({
+    description: 'Scooter park alanında değil ya da park yasak bölgede',
+  })
+  end(
+    @CurrentRider() rider: RiderPrincipal,
+    @Body() dto: EndRentalDto,
+  ): Promise<RentalResponseDto> {
+    return this.rentals.end(rider, dto);
   }
 }

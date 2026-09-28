@@ -1,10 +1,16 @@
 /**
- * Bir uç noktaya kimin erişebildiği. İşaretlenmemiş uç noktalar sadece tam yetkili API
- * anahtarıyla çağrılır (loglar, alan oluşturma, filo yönetimi).
+ * Bir uç noktaya kimin erişebildiği. İşaretlenmemiş uç noktalar operasyon işleridir (loglar,
+ * alan ve filo yönetimi): API anahtarı ya da yönetici oturumu.
  */
 export enum Access {
-  /** API anahtarı ya da sürücü oturumu: konum gönderme, alan ve scooter listesi. */
-  RIDER_OR_SERVICE = 'rider-or-service',
+  /** Varsayılan: API anahtarı ya da yönetici. */
+  OPERATOR = 'operator',
+  /** Giriş yapmış herkes: alan ve scooter listesi. */
+  ANY = 'any',
+  /** Konum kaynakları: API anahtarı ya da sürücü. Yönetici konum göndermez. */
+  DEVICE = 'device',
   /** Sadece sürücü oturumu: kiralama, oturum bilgisi. Kimin adına işlem yapıldığı bellidir. */
   RIDER = 'rider',
+  /** Sadece yönetici oturumu: yönetici çıkışı ve oturum bilgisi. */
+  ADMIN = 'admin',
 }

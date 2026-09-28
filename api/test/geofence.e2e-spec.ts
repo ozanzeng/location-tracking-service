@@ -2,10 +2,6 @@ import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { laneOf } from '../src/queue/lanes.js';
 import { LocationLanes } from '../src/queue/location-lanes.js';
-import {
-  LEGACY_LOCATION_QUEUE,
-  LOCATION_JOB,
-} from '../src/queue/location-job.js';
 import { GeofenceService } from '../src/geofence/geofence.service.js';
 import {
   at,
@@ -18,6 +14,10 @@ import {
   sendLocation,
   waitForQueueDrain,
 } from './helpers.js';
+import {
+  LEGACY_LOCATION_QUEUE,
+  LOCATION_JOB,
+} from '../src/queue/queue.constants.js';
 
 describe('Konum → alan giriş/çıkış (e2e)', () => {
   let app: INestApplication;

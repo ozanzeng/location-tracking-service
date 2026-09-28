@@ -1,7 +1,8 @@
 import 'reflect-metadata';
 import { DataSource, QueryFailedError } from 'typeorm';
-import { type AppConfig, loadConfig } from '../../src/config/configuration.js';
+import { loadConfig } from '../../src/config/configuration.js';
 import { typeOrmOptions } from '../../src/database/typeorm-options.js';
+import type { AppConfig } from '../../src/config/configuration.types.js';
 
 export async function connect(
   override: (c: AppConfig) => AppConfig = (c) => c,

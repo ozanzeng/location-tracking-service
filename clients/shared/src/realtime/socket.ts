@@ -4,8 +4,8 @@ let socket: Socket | null = null;
 let token: string | null = null;
 
 /**
- * Uygulama boyunca tek bağlantı; ekranlar sadece abonelik değiştirir. Sürücü oturumu varsa
- * token el sıkışmada gider (auth.token); operasyonun anahtarını nginx ekler.
+ * Uygulama boyunca tek bağlantı; ekranlar sadece abonelik değiştirir. Oturum (sürücü ya da
+ * yönetici) token'ı el sıkışmada gider (auth.token).
  */
 export function getSocket(): Socket {
   socket ??= io({

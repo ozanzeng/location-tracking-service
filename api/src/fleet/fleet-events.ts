@@ -6,8 +6,9 @@ import {
 } from '@nestjs/common';
 import type { Redis } from 'ioredis';
 import { closeRedis, createRedis } from '../common/redis/create-redis.js';
-import { APP_CONFIG, type AppConfig } from '../config/configuration.js';
-import { fleetChannel, type FleetChangedMessage } from './fleet.constants.js';
+import type { FleetChangedMessage } from './fleet.types.js';
+import type { AppConfig } from '../config/configuration.types.js';
+import { APP_CONFIG } from '../config/config.constants.js';
 
 /**
  * Filo değişikliklerini Redis'e duyurur (API: ekleme, silme, kiralama; worker: sinyal kaybında
@@ -45,3 +46,6 @@ export class FleetEvents implements OnApplicationShutdown {
     await closeRedis(this.redis);
   }
 }
+
+/** Filo değişikliklerinin duyurulduğu kanal; önek ortamları ayırır. */
+export const fleetChannel = (prefix: string) => `${prefix}:fleet`;

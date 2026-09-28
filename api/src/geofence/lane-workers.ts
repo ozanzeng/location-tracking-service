@@ -7,10 +7,11 @@ import {
 } from '@nestjs/common';
 import { type Job, type Processor, Worker } from 'bullmq';
 import type { Redis } from 'ioredis';
-import { APP_CONFIG, type AppConfig } from '../config/configuration.js';
 import { throttledErrorLogger } from '../common/redis/create-redis.js';
 import { LocationLanes } from '../queue/location-lanes.js';
 import { LocationProcessor } from './location.processor.js';
+import type { AppConfig } from '../config/configuration.types.js';
+import { APP_CONFIG } from '../config/config.constants.js';
 
 /**
  * Bir şeridin worker'ı. Aynı anda tek iş: sürecin kendi sınırı (concurrency 1) ve tüm süreçler

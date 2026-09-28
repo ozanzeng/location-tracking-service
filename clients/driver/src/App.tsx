@@ -4,23 +4,11 @@ import type { Rental, Session } from '@shared/api/types';
 import { setSocketAuth } from '@shared/realtime/socket';
 import { LoginScreen } from './account/LoginScreen';
 import { ScooterPicker } from './account/ScooterPicker';
-import { clearSession, loadSession, saveSession, type StoredSession } from './account/storedSession';
-import { DriverScreen, RideEnd } from './DriverScreen';
-
-/** Ekran akışı: giriş → scooter seçimi → sürüş → (sürüş bitince) scooter seçimi. */
-const Screen = {
-  /** Saklı oturum doğrulanıyor, süren kiralama aranıyor. */
-  CHECKING: 'checking',
-  SIGNED_OUT: 'signed-out',
-  PICKING: 'picking',
-  RIDING: 'riding',
-} as const;
-
-type Phase =
-  | { kind: typeof Screen.CHECKING }
-  | { kind: typeof Screen.SIGNED_OUT; notice: string | null }
-  | { kind: typeof Screen.PICKING; notice: string | null }
-  | { kind: typeof Screen.RIDING; scooterId: string };
+import { clearSession, loadSession, saveSession } from './account/storedSession';
+import { DriverScreen } from './DriverScreen';
+import { Screen, type Phase } from './app.types';
+import { RideEnd } from './ride/ride.types';
+import type { StoredSession } from './account/account.types';
 
 const stored = loadSession();
 // Kimlik ilk istekten önce bağlansın: DriverScreen açılır açılmaz istek atar.

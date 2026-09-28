@@ -1,10 +1,11 @@
 import type { Job, Worker } from 'bullmq';
 import { Redis } from 'ioredis';
-import { type AppConfig, loadConfig } from '../src/config/configuration.js';
+import { loadConfig } from '../src/config/configuration.js';
 import { createLaneWorker } from '../src/geofence/lane-workers.js';
 import { laneOf } from '../src/queue/lanes.js';
 import { LaneLayoutError, LocationLanes } from '../src/queue/location-lanes.js';
-import type { LocationJobData } from '../src/queue/location-job.js';
+import type { LocationJobData } from '../src/queue/queue.types.js';
+import type { AppConfig } from '../src/config/configuration.types.js';
 
 /**
  * Şerit mekanizması gerçek Redis üzerinde: birden çok worker süreci (burada aynı şeride bağlı

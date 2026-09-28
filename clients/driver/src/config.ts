@@ -1,4 +1,4 @@
-import type { LatLng } from './geo/latlng';
+import type { LatLng } from './geo/geo.types';
 
 /** Case: mobil uygulama aktifken yaklaşık 5 saniyede bir konum gönderir. */
 export const GPS_INTERVAL_MS = 5000;
@@ -35,3 +35,17 @@ export const OUTBOX_DRAIN_TIMEOUT_MS = 10_000;
 
 /** Sürücü oturumunun tarayıcıda saklandığı anahtar (localStorage). */
 export const SESSION_STORAGE_KEY = 'rider-session';
+
+/** Yol ağı (roads/RoadNetwork.ts) */
+
+/** Izgara hücresi ~110 m; yakın yol ararken sadece çevredeki hücrelere bakılır. */
+export const CELL_DEG = 0.001;
+
+/** Sınır noktalarının kendisi yolun "dışı" sayılsın diye kesişim karşılaştırmasında pay. */
+export const GEOMETRY_EPS = 1e-9;
+
+/** Bölge içindeki hedefte: sınır noktası tıklanan yere uzaksa bu katsayıyla cezalandırılır. */
+export const ENTRY_DISTANCE_WEIGHT = 2;
+
+/** Bölge içindeki hedefte, hedefe en yakın bu kadar sınır noktasına rota denenir. */
+export const ENTRY_CANDIDATES = 6;

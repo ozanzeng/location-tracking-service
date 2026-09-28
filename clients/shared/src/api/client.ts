@@ -1,4 +1,6 @@
 import type {
+  Admin,
+  AdminSession,
   Area,
   AreaType,
   Health,
@@ -14,6 +16,7 @@ import type {
 } from './types';
 import type { Polygon } from 'geojson';
 import { newRequestId } from './requestId';
+import { API_BASE_URL } from '../config';
 
 /** Sunucunun döndüğü hata; istemci Retry-After'a göre bekleyebilsin diye ayrıntılı. */
 export class ApiError extends Error {
@@ -27,15 +30,21 @@ export class ApiError extends Error {
   }
 }
 
-const BASE = import.meta.env.VITE_API_URL ?? '/api';
-
 /**
- * Sürücü oturumu: varsa her isteğe Authorization: Bearer olarak eklenir. Operasyon uygulaması
- * kullanmaz; onun anahtarını nginx ekler.
+ * Oturum (sürücü ya da yönetici): varsa her isteğe Authorization: Bearer olarak eklenir.
  */
 let authToken: string | null = null;
 export function setAuthToken(token: string | null): void {
   authToken = token;
+}
+
+/**
+ * Oturumla atılan bir istek 401 alınca (oturum düştü ya da süresi doldu) çağrılır. Operasyon
+ * uygulaması her ekranda ayrı ayrı ele almak yerine giriş ekranına döner.
+ */
+let onUnauthorized: (() => void) | null = null;
+export function setUnauthorizedHandler(handler: (() => void) | null): void {
+  onUnauthorized = handler;
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<{ body: T; requestId: string | null }> {
@@ -43,7 +52,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<{ body: T; 
   const requestId = newRequestId();
   let res: Response;
   try {
-    res = await fetch(`${BASE}${path}`, {
+    res = await fetch(`${API_BASE_URL}${path}`, {
       ...init,
       headers: {
         'content-type': 'application/json',
@@ -61,6 +70,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<{ body: T; 
     const message = Array.isArray(body?.message)
       ? body.message.join(', ')
       : (body?.message ?? `İstek başarısız (${res.status})`);
+    if (res.status === 401 && authToken && !path.startsWith('/auth/')) onUnauthorized?.();
     const retryAfter = Number(res.headers.get('retry-after'));
     throw new ApiError(message, res.status, Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : null, echoed);
   }
@@ -107,6 +117,11 @@ export const api = {
   logout: () => post<void>('/auth/logout'),
   me: () => get<Rider>('/auth/me'),
 
+  // Yönetici hesabı (operasyon paneli)
+  adminLogin: (username: string, password: string) => post<AdminSession>('/auth/admin/login', { username, password }),
+  adminLogout: () => post<void>('/auth/admin/logout'),
+  adminMe: () => get<Admin>('/auth/admin/me'),
+
   // Filo ve kiralama
   scooters: () => get<Scooter[]>('/scooters'),
   scooterDetail: (id: string) => get<ScooterDetail>(`/scooters/${encodeURIComponent(id)}`),
@@ -116,5 +131,9 @@ export const api = {
   },
   rent: (scooterId: string) => post<Rental>('/rentals', { scooterId }),
   currentRental: async () => (await get<{ rental: Rental | null }>('/rentals/current')).rental,
-  endRental: () => post<Rental>('/rentals/current/end'),
+  /**
+   * Sürüşü bitirir. Sunucu sadece park alanında bitirir; cihazın o anki konumu gönderilir
+   * (kuyruktaki son konum henüz işlenmemiş olabilir). Sürüşe hiç başlanmadıysa konumsuz.
+   */
+  endRental: (at?: { lat: number; lng: number }) => post<Rental>('/rentals/current/end', at),
 };

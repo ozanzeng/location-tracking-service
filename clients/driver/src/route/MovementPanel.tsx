@@ -1,10 +1,5 @@
-import { NoticeKind, type RouteNotice } from './useRoutePlanner';
-
-/** Scooter'ı hareket ettirme biçimi. */
-export const MoveMode = { DRAG: 'drag', ROUTE: 'route' } as const;
-export type MoveMode = (typeof MoveMode)[keyof typeof MoveMode];
-
-const MODE_LABELS: Record<MoveMode, string> = { [MoveMode.DRAG]: 'Sürükle', [MoveMode.ROUTE]: 'Rota çiz' };
+import { MoveMode, NoticeKind, type RouteNotice } from './route.types';
+import { MODE_LABELS } from './route.constants';
 
 interface Props {
   mode: MoveMode;

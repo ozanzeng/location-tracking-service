@@ -1,9 +1,11 @@
 // @vitest-environment jsdom
 import { act, renderHook } from '@testing-library/react';
 import { describe, expect, test } from 'vitest';
-import type { Zone } from '../geo/zone';
-import { RoadNetwork, type CompactRoads } from '../roads/RoadNetwork';
-import { NoticeKind, useRoutePlanner } from './useRoutePlanner';
+import { RoadNetwork } from '../roads/RoadNetwork';
+import { useRoutePlanner } from './useRoutePlanner';
+import type { Zone } from '../geo/geo.types';
+import type { CompactRoads } from '../roads/roads.types';
+import { NoticeKind } from './route.types';
 
 // Dört tarafı yollu ~220 m'lik blok; üst kenarın ortasında küçük bir sürüş yasak bölge.
 //   B ──[X]── C

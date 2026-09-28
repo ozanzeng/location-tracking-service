@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, ApiError } from '@shared/api/client';
-import { DeviceLogResult, EventType, RentalEndReason, ScooterStatus, type ScooterDetail } from '@shared/api/types';
+import { DeviceLogResult, EventType, ScooterStatus, type ScooterDetail } from '@shared/api/types';
 import { SignIcon } from '@shared/zones/SignIcon';
 import { SCOOTER_DETAIL_REFRESH_MS } from '../config';
 import { formatAgo, formatDuration } from '../logs/duration';
+import { END_REASONS } from './fleet.constants';
 
 const timeFmt = new Intl.DateTimeFormat('tr-TR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 const dateFmt = new Intl.DateTimeFormat('tr-TR', {
@@ -12,11 +13,6 @@ const dateFmt = new Intl.DateTimeFormat('tr-TR', {
   hour: '2-digit',
   minute: '2-digit',
 });
-
-const END_REASONS: Record<RentalEndReason, string> = {
-  [RentalEndReason.RETURNED]: 'bıraktı',
-  [RentalEndReason.SIGNAL_LOST]: 'sinyal kaybı',
-};
 
 function StatusBadge({ detail }: { detail: ScooterDetail }) {
   if (!detail.registered) {

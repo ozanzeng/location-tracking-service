@@ -5,7 +5,7 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, test } from 'node:test';
 import { chromium } from 'playwright-core';
-import { OPS_URL } from './driverSession.mjs';
+import { adminHeaders, OPS_URL, signInOps } from './driverSession.mjs';
 
 const NAME = `UI testi şekil ${Date.now().toString(36)}`;
 // Moda açıklarında, denizde.
@@ -20,13 +20,17 @@ const SQUARE = [
 let browser;
 let page;
 let area;
+let headers;
 const errors = [];
 
 before(async () => {
   browser = await chromium.launch({ channel: process.env.PW_CHANNEL ?? 'chrome', headless: true });
   page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
   page.on('pageerror', (e) => errors.push(e.message));
+  await signInOps(page);
+  headers = await adminHeaders();
   const res = await page.request.post(`${OPS_URL}/api/areas`, {
+    headers,
     data: { name: NAME, type: 'SLOW', geometry: { type: 'Polygon', coordinates: [SQUARE] } },
   });
   assert.equal(res.status(), 201);
@@ -34,7 +38,7 @@ before(async () => {
 });
 
 after(async () => {
-  if (area) await page.request.delete(`${OPS_URL}/api/areas/${area.id}`);
+  if (area) await page.request.delete(`${OPS_URL}/api/areas/${area.id}`, { headers });
   await browser?.close();
 });
 
@@ -58,7 +62,9 @@ describe('alan şekli düzenleme', () => {
     await page.getByRole('button', { name: 'Değişiklikleri kaydet' }).click();
     await page.locator('.panel .hint', { hasText: 'güncellendi' }).waitFor();
 
-    const saved = (await (await page.request.get(`${OPS_URL}/api/areas`)).json()).find((a) => a.id === area.id);
+    const saved = (await (await page.request.get(`${OPS_URL}/api/areas`, { headers })).json()).find(
+      (a) => a.id === area.id,
+    );
     assert.equal(saved.name, NAME);
     assert.equal(saved.type, 'SLOW');
     const [moved] = saved.geometry.coordinates[0].slice(1, 2);

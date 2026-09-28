@@ -1,5 +1,5 @@
 import { DataSource, type DataSourceOptions } from 'typeorm';
-import { type AppConfig, loadConfig } from '../../src/config/configuration.js';
+import { loadConfig } from '../../src/config/configuration.js';
 import { revertLastMigration } from '../../src/database/migration-runner.js';
 import { DEFAULT_SCOOTERS } from '../../src/database/migrations/1727500000000-FleetAndRiders.js';
 import { OpenVisitIndexAndHotUpdates1727100000000 } from '../../src/database/migrations/1727100000000-OpenVisitIndexAndHotUpdates.js';
@@ -9,6 +9,7 @@ import {
   typeOrmOptions,
 } from '../../src/database/typeorm-options.js';
 import { expectPgError } from './db-helpers.js';
+import type { AppConfig } from '../../src/config/configuration.types.js';
 
 const FRESH = 'geofence_migration_test';
 

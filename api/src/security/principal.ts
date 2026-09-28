@@ -1,25 +1,22 @@
 import type { Request } from 'express';
 import { PrincipalKind } from './principal-kind.enum.js';
+import type {
+  RiderPrincipal,
+  AdminPrincipal,
+  Principal,
+} from './security.types.js';
 
-export interface RiderPrincipal {
-  kind: PrincipalKind.RIDER;
-  riderId: string;
-  username: string;
-}
-
-export type Principal = { kind: PrincipalKind.SERVICE } | RiderPrincipal;
-
-export const SERVICE_PRINCIPAL: Principal = { kind: PrincipalKind.SERVICE };
-
-declare module 'express' {
-  interface Request {
-    /** AuthGuard'ın atadığı kimlik. */
-    principal?: Principal;
-  }
-}
-
-export const isRider = (p: Principal | undefined): p is RiderPrincipal =>
+export const isRider = (p: Principal | undefined | null): p is RiderPrincipal =>
   p?.kind === PrincipalKind.RIDER;
+
+export const isAdmin = (p: Principal | undefined | null): p is AdminPrincipal =>
+  p?.kind === PrincipalKind.ADMIN;
+
+/** Loglarda kimin yaptığı: "admin:ayse", "rider:ali", "service". */
+export function describePrincipal(p: Principal | undefined): string {
+  if (!p) return 'anonim';
+  return p.kind === PrincipalKind.SERVICE ? p.kind : `${p.kind}:${p.username}`;
+}
 
 /** `Authorization: Bearer <token>` başlığındaki token; yoksa ya da biçimi bozuksa null. */
 export function bearerToken(req: Pick<Request, 'header'>): string | null {

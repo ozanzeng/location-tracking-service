@@ -7,12 +7,13 @@ import {
 } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
-import { APP_CONFIG, type AppConfig } from '../config/configuration.js';
 import { SIGNAL_LOSS_BATCH as SWEEP_BATCH } from '../config/limits.js';
 import { ExitReason } from '../logs/exit-reason.enum.js';
 import { signalLostVisits } from '../metrics/metrics.js';
 import { LocationLanes } from '../queue/location-lanes.js';
 import { GeofenceRepository } from './geofence.repository.js';
+import type { AppConfig } from '../config/configuration.types.js';
+import { APP_CONFIG } from '../config/config.constants.js';
 
 /**
  * Konum göndermeyi bırakan kullanıcının açık girişleri "içeride" kalmasın:

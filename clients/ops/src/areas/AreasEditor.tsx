@@ -7,8 +7,9 @@ import { AreasLayer } from '@shared/map/AreasLayer';
 import { BaseMap } from '@shared/map/BaseMap';
 import { AreaForm } from './AreaForm';
 import { AreaList } from './AreaList';
-import { DrawControl, type Draft } from './DrawControl';
+import { DrawControl } from './DrawControl';
 import { EditShape } from './EditShape';
+import type { Draft } from './areas.types';
 
 /**
  * Alan yönetimi:

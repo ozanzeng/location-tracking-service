@@ -19,11 +19,11 @@ import {
 import { AllowRiders } from '../security/access.decorator.js';
 import { ApiKeyAuth } from '../security/api-key-auth.decorator.js';
 import { CurrentPrincipal } from '../security/current-rider.decorator.js';
-import type { Principal } from '../security/principal.js';
 import { CreateScooterDto } from './dto/create-scooter.dto.js';
 import { ScooterDetailDto } from './dto/scooter-detail.dto.js';
 import { ScooterResponseDto } from './dto/scooter-response.dto.js';
 import { ScootersService } from './scooters.service.js';
+import type { Principal } from '../security/security.types.js';
 
 /** Filo: listeleme sürücüye de açık; ekleme ve silme operasyonun (API anahtarı). */
 @ApiTags('scooters')

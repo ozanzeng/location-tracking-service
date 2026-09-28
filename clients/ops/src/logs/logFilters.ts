@@ -1,26 +1,6 @@
 import type { LogQuery } from '@shared/api/types';
 import { LOGS_PAGE_SIZE as PAGE_SIZE } from '../config';
-
-/** Giriş kayıtlarında "durum" filtresi. */
-export const LogStatusFilter = {
-  ALL: 'all',
-  /** Hâlâ alanın içinde (çıkış zamanı yok). */
-  INSIDE: 'inside',
-  /** Alandan çıkmış. */
-  LEFT: 'left',
-} as const;
-export type LogStatusFilter = (typeof LogStatusFilter)[keyof typeof LogStatusFilter];
-
-export interface LogFilters {
-  userId: string;
-  areaId: string;
-  status: LogStatusFilter;
-  /** datetime-local değeri (yerel saat) */
-  from: string;
-  to: string;
-}
-
-export const EMPTY_FILTERS: LogFilters = { userId: '', areaId: '', status: LogStatusFilter.ALL, from: '', to: '' };
+import { LogStatusFilter, type LogFilters } from './logs.types';
 
 export const isEmpty = (f: LogFilters) =>
   f.userId.trim() === '' && f.areaId === '' && f.status === LogStatusFilter.ALL && f.from === '' && f.to === '';

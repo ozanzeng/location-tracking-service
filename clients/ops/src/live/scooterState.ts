@@ -1,5 +1,5 @@
 import { SCOOTER_ACTIVE_MS, SCOOTER_IDLE_MS } from '../config';
-import type { Counts } from './scooterCounts';
+import type { Counts, Silence } from './live.types';
 
 /**
  * Gelen konum haritaya uygulanmalı mı? Açılıştaki "son konumlar" isteği canlı yayından sonra
@@ -8,9 +8,6 @@ import type { Counts } from './scooterCounts';
  */
 export const isNewerPosition = (current: number | undefined, incoming: number) =>
   current === undefined || incoming >= current;
-
-/** Scooter'ın son görülmesinden bu yana geçen süreye göre durumu. */
-export type Silence = 'active' | 'idle' | 'gone';
 
 export function silence(now: number, seenAt: number): Silence {
   const silent = now - seenAt;

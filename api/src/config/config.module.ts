@@ -1,5 +1,6 @@
 import { Global, Module } from '@nestjs/common';
-import { APP_CONFIG, loadConfig } from './configuration.js';
+import { loadConfig } from './configuration.js';
+import { APP_CONFIG } from './config.constants.js';
 
 @Global()
 @Module({

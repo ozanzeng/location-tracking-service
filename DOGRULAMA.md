@@ -812,3 +812,24 @@ UPDATE migrations SET timestamp=1727500000000, name='FleetAndRiders1727500000000
 ```
 
 **Doğrulama:** `./scripts/test-all.sh` tamamı yeşil: backend birim 183, frontend birim 117, veritabanı 54, backend e2e 108 (sessiz kiralama için yeni 4 test), smoke'lar, tarayıcı e2e 23. Dev veritabanında 9 migration uygulanmış, `signal_lost` kolonu kalkmış durumda.
+
+### Soru 16
+
+> Dosya yapımız ve kod yapımız doğru mu? "Çözümün yalnızca fonksiyonel olarak çalışması değil, gerçek bir production ortamında kullanılabilecek bir servisin temel ihtiyaçları düşünülerek geliştirilmesi beklenmektedir." Bu ihtiyaca cevap veriyor muyuz, eksiğimiz kaldı mı?
+>
+> Devamı: 1, 3, 7, 8 ve 6'yı yap, README'yi güncelle. Panele admin kullanıcı adı/şifreli giriş yap.
+
+**Cevap:** Yapı doğruydu (özellik başına modül; API, worker ve migrate aynı imajda; katmanlı testler). Üretim için eksik bulunan maddeler ve yapılanlar:
+
+| # | Eksik | Yapılan |
+|---|---|---|
+| 1 | Liveness ve readiness ayrı değildi; API ve worker container'larında sağlık kontrolü ve yeniden başlatma yoktu | API'de `/health/live` (bağımlılıklara bakmaz) ve `/health/ready` (DB + Redis, kapanışta `503`); worker'ın `:9100` portunda aynıları. Compose'da API ve worker `healthcheck` (readiness), bütün uzun ömürlü servisler `restart: unless-stopped`, arayüzler API hazır olunca açılır |
+| 3 | Migration kuralı yazılı değildi (birleştirmede uygulanmış migration'ların numarası değişmişti) | README'de 6 maddelik kural. Birim testi: her dosya listede, zamana göre sıralı, sınıf adı ile `name` aynı. Veritabanı smoke: uygulanmış ama kodda olmayan (yeniden adlandırılmış) migration var mı |
+| 7 | `area_logs` sınırsız büyüyordu | Saklama işi: çıkışı `LOG_RETENTION_DAYS` (365) günden eski kapanmış kayıtlar 5.000'lik gruplarla silinir, açık girişler kalır, tek iş (advisory lock). Worker yerine ayrı süreçte (compose'da `log-retention`, Kubernetes'te CronJob), şema sahibiyle: uygulama rolünün kayıt silme yetkisi bilerek yok (denetim izi). Partitioning gerekçesiyle ertelendi (seçimi soruldu) |
+| 8 | Alarm, dashboard, dağıtık izleme yoktu | `observability` profili: Prometheus (11 alarm kuralı, `promtool` birim testiyle), Alertmanager, Grafana ("Konum servisi" panosu), Jaeger. OpenTelemetry: iz HTTP isteğinden kuyruk üzerinden worker'a ve Postgres sorgularına tek parça (bağlam iş verisinde taşınır); adres verilmezse hiç yüklenmez |
+| 6 | "Sadece park alanında bitir" kuralı sadece sürücü uygulamasındaydı | `POST /rentals/current/end` kuralı kendisi uygular: park alanında ve park yasak bölge dışında değilse `409` ve en yakın park alanı. Bitiş noktası cihazın gönderdiği konum (kuyruk gecikmesi), yoksa sunucudaki son konum; kiralamada hiç konum yoksa bırakılabilir. Bildirilen konumu son konumla karşılaştıran 150 m'lik sınır da yazıldı, tarayıcı testi gerçek sürüşü reddettiği için kaldırıldı: güvenlik sağlamıyordu (aynı token'la sahte konum da gönderilebilir) |
+| 5 | Panel tam yetkili API anahtarıyla çalışıyordu (nginx ekliyordu) | Yönetici hesabı: `admins` tablosu (Argon2id), `POST /auth/admin/login`, oturum (12 saat), panelde giriş ekranı ve çıkış, oturum düşünce giriş ekranı. nginx artık anahtar eklemez. İlk yönetici migrate adımında `ADMIN_USERNAME`/`ADMIN_PASSWORD` ile (demo: `admin` / `admin-demo-sifresi`, production'da reddedilir), sonrakiler `npm run admin:set`. Erişim düzeyleri tabloya bağlandı (yönetici konum gönderemez, kiralayamaz). Veriyi değiştiren istekler kimin yaptığıyla loglanır (`Audit`) |
+
+Kalan (README, "Bilinçli olarak kapsam dışı"): CI pipeline ve deploy manifest'leri, yönetici rolleri ve kalıcı denetim tablosu, konum sahteciliğine karşı cihaz doğrulama, partitioning, outbox.
+
+**Doğrulama:** `./scripts/test-all.sh` tamamı yeşil (izleme açıkken): backend birim 196, frontend birim 120, alarm kuralları 3 senaryo, veritabanı 57, backend e2e 122 (yeni: yönetici 7, park kuralı 7), üç smoke testi, tarayıcı e2e 23. Gözlemlenebilirlik yığını çalıştırılıp elle kontrol edildi: Prometheus API ve iki worker'ı kazıyor, 11 kural yüklü, Grafana panosu hazır, Jaeger'de bir konumun izi API'den worker'daki sorgulara kadar tek parça.

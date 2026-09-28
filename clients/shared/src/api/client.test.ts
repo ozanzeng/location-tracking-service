@@ -1,5 +1,5 @@
 import { describe, expect, test, vi } from 'vitest';
-import { api, ApiError } from './client';
+import { api, ApiError, setAuthToken, setUnauthorizedHandler } from './client';
 
 const point = { userId: 'u1', lat: 41, lng: 29, timestamp: '2026-01-01T10:00:00Z' };
 
@@ -62,5 +62,26 @@ describe('api istemcisi', () => {
     const fetchMock = mockFetch(200, { data: [], nextCursor: null });
     await api.logs({ userId: 'u1', areaId: undefined, active: false, limit: 50 });
     expect(calls(fetchMock)[0][0]).toBe('/api/logs?userId=u1&active=false&limit=50');
+  });
+
+  test('oturumla atılan istek 401 alınca oturum düştü bildirilir; giriş denemesi ve oturumsuz istek bildirmez', async () => {
+    const onUnauthorized = vi.fn();
+    setUnauthorizedHandler(onUnauthorized);
+    try {
+      mockFetch(401, { message: 'Oturum geçersiz' });
+      await api.logs().catch(() => undefined);
+      expect(onUnauthorized).not.toHaveBeenCalled();
+
+      setAuthToken('oturum-token-1234567890');
+      await api.adminLogin('ayse', 'yanlis').catch(() => undefined);
+      expect(onUnauthorized).not.toHaveBeenCalled();
+      const fetchMock = mockFetch(401, { message: 'Oturum geçersiz' });
+      await api.logs().catch(() => undefined);
+      expect(onUnauthorized).toHaveBeenCalledTimes(1);
+      expect(calls(fetchMock)[0][1].headers.authorization).toBe('Bearer oturum-token-1234567890');
+    } finally {
+      setAuthToken(null);
+      setUnauthorizedHandler(null);
+    }
   });
 });

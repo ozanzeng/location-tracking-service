@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, type RefObject } from 'react';
 import type { Area, LocationPoint } from '@shared/api/types';
 import { GPS_INTERVAL_MS, MIN_SAMPLE_GAP_MS } from '../config';
-import type { LatLng } from '../geo/latlng';
 import { areaToZone, pointInZone } from '../geo/zone';
+import type { LatLng } from '../geo/geo.types';
 
 /** Noktayı içeren alanların kimlikleri; sınır geçişini fark etmek için karşılaştırılır. */
 const zonesKey = (p: LatLng, zones: Array<{ id: string; zone: ReturnType<typeof areaToZone> }>) =>

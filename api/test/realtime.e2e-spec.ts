@@ -81,7 +81,7 @@ describe('Canlı yayın (e2e)', () => {
     ).toEqual({ ok: false, error: expect.stringMatching(/size kiralı değil/) });
     expect(await socket.emitWithAck('subscribe', { monitor: true })).toEqual({
       ok: false,
-      error: expect.stringMatching(/API anahtarı ister/),
+      error: expect.stringMatching(/API anahtarı ya da yönetici oturumu ister/),
     });
 
     const ops = connect(KEY);
@@ -166,7 +166,7 @@ describe('Canlı yayın (e2e)', () => {
     await Promise.all([connected(driver), connected(logs), connected(monitor)]);
     expect(await driver.emitWithAck('subscribe', { events: true })).toEqual({
       ok: false,
-      error: expect.stringMatching(/API anahtarı ister/),
+      error: expect.stringMatching(/API anahtarı ya da yönetici oturumu ister/),
     });
     expect(await logs.emitWithAck('subscribe', { events: true })).toEqual({
       ok: true,

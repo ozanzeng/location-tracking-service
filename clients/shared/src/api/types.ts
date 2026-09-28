@@ -150,6 +150,19 @@ export interface Rider {
   username: string;
 }
 
+/** Operasyon paneli yöneticisi. */
+export interface Admin {
+  id: string;
+  username: string;
+}
+
+/** POST /auth/admin/login yanıtı. */
+export interface AdminSession {
+  token: string;
+  expiresIn: number;
+  admin: Admin;
+}
+
 /** POST /auth/login ve /auth/register yanıtı. */
 export interface Session {
   token: string;

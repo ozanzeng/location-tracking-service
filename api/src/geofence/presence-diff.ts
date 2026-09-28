@@ -1,7 +1,4 @@
-export interface PresenceDiff {
-  entered: string[];
-  exited: string[];
-}
+import type { PresenceDiff } from './geofence.types.js';
 
 /**
  * Önceki ve şimdiki alan kümelerinden giriş/çıkışları hesaplar.

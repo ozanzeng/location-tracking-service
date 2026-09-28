@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import type { Area } from '@shared/api/types';
-import { areaToZone, distanceToZone, pointInZone, zonesOfType, type Zone } from './zone';
+import { areaToZone, distanceToZone, pointInZone, zonesOfType } from './zone';
+import type { Zone } from './geo.types';
 
 // 0..1 kare, ortasında 0.4..0.6 delik
 const ring = (a: number, b: number) => [

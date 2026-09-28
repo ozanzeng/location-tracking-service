@@ -3,6 +3,9 @@ import {
   Module,
   type NestModule,
 } from '@nestjs/common';
+import { APP_INTERCEPTOR } from '@nestjs/core';
+import { AdminsModule } from './admins/admins.module.js';
+import { AuditInterceptor } from './common/http/audit.interceptor.js';
 import { AreasModule } from './areas/areas.module.js';
 import { RequestContextMiddleware } from './common/http/request-context.middleware.js';
 import { AppConfigModule } from './config/config.module.js';
@@ -23,6 +26,7 @@ import { SecurityModule } from './security/security.module.js';
     DatabaseModule,
     SecurityModule,
     RidersModule,
+    AdminsModule,
     FleetModule,
     AreasModule,
     LocationsModule,
@@ -31,6 +35,7 @@ import { SecurityModule } from './security/security.module.js';
     MetricsModule,
     RealtimeModule,
   ],
+  providers: [{ provide: APP_INTERCEPTOR, useClass: AuditInterceptor }],
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer): void {

@@ -17,18 +17,14 @@ server {
     # Değişkenli proxy_pass yolu kendisi değiştirmez: /api öneki burada atılır (sorgu korunur).
     rewrite ^/api/(.*)$ /$1 break;
     proxy_pass $api_upstream;
-    # nginx imajı başlangıçta API_KEY ortam değişkenini buraya yerleştirir. Anahtar tarayıcı
-    # kodunda görünmez ama bu nginx'e erişen herkes onun yetkisiyle istek atar; bu yüzden
-    # sadece operasyon uygulamasına verilir. Sürücüde boştur ve nginx boş başlığı iletmez:
-    # sürücü kendi oturumuyla (Authorization) istek atar (docker-compose.yml).
-    proxy_set_header x-api-key "${API_KEY}";
+    # API anahtarı eklenmez: iki uygulama da oturumla (Authorization: Bearer) istek atar;
+    # sürücü sürücü hesabıyla, operasyon yönetici hesabıyla giriş yapar.
     proxy_set_header Host $host;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
   }
 
   location /socket.io/ {
     proxy_pass $api_upstream;
-    proxy_set_header x-api-key "${API_KEY}";
     proxy_http_version 1.1;
     proxy_set_header Upgrade $http_upgrade;
     proxy_set_header Connection "upgrade";

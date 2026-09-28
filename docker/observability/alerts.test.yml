@@ -1,0 +1,55 @@
+# Alarm kurallarının birim testi:
+#   docker run --rm --entrypoint promtool -v "$PWD/docker/observability:/c" -w /c \
+#     prom/prometheus:v3.5.0 test rules alerts.test.yml
+rule_files:
+  - alerts.yml
+evaluation_interval: 15s
+
+tests:
+  - name: API kopyası düşünce 1 dakika sonra alarm
+    interval: 15s
+    input_series:
+      - series: 'up{job="api", instance="10.0.0.2:3000"}'
+        values: "1 1 0 0 0 0 0 0"
+      - series: 'up{job="worker", instance="10.0.0.3:9100"}'
+        values: "1 1 1 1 1 1 1 1"
+    alert_rule_test:
+      - eval_time: 30s
+        alertname: ApiDown
+        exp_alerts: []
+      - eval_time: 105s
+        alertname: ApiDown
+        exp_alerts:
+          - exp_labels: { severity: critical, job: api, instance: "10.0.0.2:3000" }
+            exp_annotations:
+              summary: "API kopyası 10.0.0.2:3000 cevap vermiyor"
+              description: "Metrikler 1 dakikadır kazınamıyor. Konumlar kabul edilmiyor olabilir."
+      - eval_time: 105s
+        alertname: NoWorkers
+        exp_alerts: []
+
+  - name: Kuyruk doluyken reddedilen konum alarmı
+    interval: 15s
+    input_series:
+      - series: 'locations_rejected_total{reason="backpressure", job="api", instance="a"}'
+        values: "0 0 5 10 15 20 25 30 35 40"
+      - series: 'locations_rejected_total{reason="rate_limited", job="api", instance="a"}'
+        values: "0+10x9"
+    alert_rule_test:
+      - eval_time: 135s
+        alertname: LocationsRejectedBackpressure
+        exp_alerts:
+          - exp_labels: { severity: critical }
+            exp_annotations:
+              summary: "Kuyruk dolu: konumlar 503 ile reddediliyor"
+              description: "Cihazlar Retry-After kadar bekleyip tekrar dener; kalıcıysa worker kapasitesi yetersiz."
+
+  - name: Sadece rate limit reddi backpressure alarmı üretmez
+    interval: 15s
+    input_series:
+      - series: 'locations_rejected_total{reason="rate_limited", job="api", instance="a"}'
+        values: "0+10x9"
+    alert_rule_test:
+      - eval_time: 135s
+        alertname: LocationsRejectedBackpressure
+        exp_alerts: []

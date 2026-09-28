@@ -30,6 +30,8 @@ run "Frontend: tip kontrolü"            in_clients npm run typecheck --silent
 # Birim
 run "Backend: birim"                    in_api npm test --silent
 run "Frontend: birim"                   in_clients npm run test:unit --silent
+run "Alarm kuralları (promtool)"       docker run --rm --entrypoint promtool -v "$PWD/docker/observability:/c" -w /c \
+                                          prom/prometheus:v3.5.0 test rules alerts.test.yml
 # Veritabanı ve e2e (gerçek PostGIS + Redis; ayrı test veritabanı)
 run "Veritabanı: migration, kısıt, plan" in_api npm run test:db --silent
 run "Backend: e2e"                      in_api npm run test:e2e --silent

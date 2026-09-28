@@ -6,15 +6,20 @@ import {
 import type { Reflector } from '@nestjs/core';
 import type { Request } from 'express';
 import { loadConfig } from '../config/configuration.js';
-import { ACCESS } from './access.decorator.js';
 import { Access } from './access.enum.js';
 import { AuthGuard } from './auth.guard.js';
 import { PrincipalKind } from './principal-kind.enum.js';
-import type { RiderPrincipal } from './principal.js';
-import { IS_PUBLIC } from './public.decorator.js';
-import type { RiderSessions } from './rider-sessions.js';
+import type { Sessions } from './sessions.js';
+import type { AdminPrincipal, RiderPrincipal } from './security.types.js';
+import { ACCESS, IS_PUBLIC } from './security.constants.js';
 
 const TOKEN = 'gecerli-token-1234567890';
+const ADMIN_TOKEN = 'yonetici-token-1234567890';
+const ADMIN: AdminPrincipal = {
+  kind: PrincipalKind.ADMIN,
+  adminId: 'a1',
+  username: 'ayse',
+};
 const RIDER: RiderPrincipal = {
   kind: PrincipalKind.RIDER,
   riderId: 'r1',
@@ -42,8 +47,9 @@ const guardWith = (
         key === IS_PUBLIC ? isPublic : key === ACCESS ? access : undefined,
     } as unknown as Reflector,
     {
-      resolve: async (token: string) => (token === TOKEN ? RIDER : null),
-    } as unknown as RiderSessions,
+      resolve: async (token: string) =>
+        token === TOKEN ? RIDER : token === ADMIN_TOKEN ? ADMIN : null,
+    } as unknown as Sessions,
     {
       ...loadConfig({}),
       security: { ...loadConfig({}).security, apiKeys },
@@ -99,7 +105,7 @@ describe('AuthGuard', () => {
 
     it('@AllowRiders uç noktalara erişir ve sürücü isteğe bağlanır', async () => {
       const { ok, req } = await activate(
-        guardWith(['k1'], { access: Access.RIDER_OR_SERVICE }),
+        guardWith(['k1'], { access: Access.ANY }),
         bearer,
       );
       expect(ok).toBe(true);
@@ -122,7 +128,7 @@ describe('AuthGuard', () => {
 
     it('geçersiz ya da süresi dolmuş token 401 alır, anahtara geri düşülmez', async () => {
       await expect(
-        activate(guardWith(['k1'], { access: Access.RIDER_OR_SERVICE }), {
+        activate(guardWith(['k1'], { access: Access.ANY }), {
           authorization: 'Bearer suresi-dolmus-token-123',
           'x-api-key': 'k1',
         }),
@@ -135,6 +141,44 @@ describe('AuthGuard', () => {
           'x-api-key': 'k1',
         }),
       ).rejects.toThrow(UnauthorizedException);
+    });
+  });
+
+  describe('yönetici oturumu', () => {
+    const bearer = { authorization: `Bearer ${ADMIN_TOKEN}` };
+
+    it('işaretlenmemiş (operasyon) uç noktalara erişir ve yönetici isteğe bağlanır', async () => {
+      const { ok, req } = await activate(guardWith(['k1']), bearer);
+      expect(ok).toBe(true);
+      expect(req.principal).toEqual(ADMIN);
+    });
+
+    it('alan ve scooter listesine erişir (@AllowRiders)', async () => {
+      await expect(
+        activate(guardWith(['k1'], { access: Access.ANY }), bearer),
+      ).resolves.toMatchObject({ ok: true });
+    });
+
+    it.each([Access.DEVICE, Access.RIDER])(
+      '%s uç noktalarda 403 (konum gönderemez, kiralayamaz)',
+      async (access) => {
+        await expect(
+          activate(guardWith(['k1'], { access }), bearer),
+        ).rejects.toThrow(ForbiddenException);
+      },
+    );
+
+    it('@AdminsOnly uç noktalar API anahtarıyla çağrılamaz, sürücü 403 alır', async () => {
+      await expect(
+        activate(guardWith(['k1'], { access: Access.ADMIN }), {
+          'x-api-key': 'k1',
+        }),
+      ).rejects.toThrow(UnauthorizedException);
+      await expect(
+        activate(guardWith(['k1'], { access: Access.ADMIN }), {
+          authorization: `Bearer ${TOKEN}`,
+        }),
+      ).rejects.toThrow(ForbiddenException);
     });
   });
 });

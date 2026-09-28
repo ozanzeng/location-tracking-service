@@ -1,5 +1,5 @@
 import type { Area, Scooter } from '@shared/api/types';
-import { LogStatusFilter, type LogFilters } from './logFilters';
+import { LogStatusFilter, type LogFilters } from './logs.types';
 
 interface Props {
   value: LogFilters;

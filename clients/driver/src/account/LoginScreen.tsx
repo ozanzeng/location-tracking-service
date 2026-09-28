@@ -2,9 +2,7 @@ import { type FormEvent, useState } from 'react';
 import { api, ApiError } from '@shared/api/client';
 import { PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH, USERNAME_MAX_LENGTH, USERNAME_MIN_LENGTH } from '@shared/api/limits';
 import type { Session } from '@shared/api/types';
-
-const Mode = { LOGIN: 'login', REGISTER: 'register' } as const;
-type Mode = (typeof Mode)[keyof typeof Mode];
+import { Mode } from './account.types';
 
 /** Giriş ya da üyelik; ikisi de oturum açar. */
 export function LoginScreen({ onSignedIn }: { onSignedIn: (session: Session) => void }) {

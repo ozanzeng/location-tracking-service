@@ -1,7 +1,9 @@
 import { describe, expect, test } from 'vitest';
 import { formatAgo, formatDuration } from './duration';
-import { EMPTY_FILTERS, isEmpty, toLogQuery } from './logFilters';
-import { VisitStatus, visitStatus } from './visitStatus';
+import { isEmpty, toLogQuery } from './logFilters';
+import { visitStatus } from './visitStatus';
+import { EMPTY_FILTERS } from './logs.constants';
+import { VisitStatus } from './logs.types';
 
 describe('formatDuration', () => {
   test.each([

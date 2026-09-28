@@ -2,8 +2,8 @@
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import type { Area, LocationPoint } from '@shared/api/types';
-import type { LatLng } from '../geo/latlng';
 import { useGpsSampler } from './useGpsSampler';
+import type { LatLng } from '../geo/geo.types';
 
 /** 29.02–29.03 boylam, 40.98–40.99 enlem arası park alanı. */
 const park: Area = {

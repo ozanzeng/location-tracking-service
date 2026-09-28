@@ -5,7 +5,6 @@ import { AreasLayer } from '@shared/map/AreasLayer';
 import { BaseMap } from '@shared/map/BaseMap';
 import { Legend } from '@shared/zones/Legend';
 import { START_POSITION, START_SNAP_METERS } from './config';
-import type { LatLng } from './geo/latlng';
 import { ConnectionPanel } from './device/ConnectionPanel';
 import { DeviceLog } from './device/DeviceLog';
 import { useGpsSampler } from './device/useGpsSampler';
@@ -19,16 +18,15 @@ import { RiderMarker } from './rider/RiderMarker';
 import { riderZone } from './rider/riderZone';
 import { useRiderEvents } from './rider/useRiderEvents';
 import { useRiderPosition } from './rider/useRiderPosition';
-import { MovementPanel, MoveMode } from './route/MovementPanel';
+import { MovementPanel } from './route/MovementPanel';
 import { RouteDrawing } from './route/RouteDrawing';
 import { RouteLayer } from './route/RouteLayer';
 import { useRoadNetwork } from './route/useRoadNetwork';
 import { useRoutePlanner } from './route/useRoutePlanner';
 import { useRoutePlayback } from './route/useRoutePlayback';
-
-/** Sürüşün nasıl bittiği: sürücü bıraktı ya da sunucu sinyal kaybıyla bitirdi. */
-export const RideEnd = { RETURNED: 'returned', LOST: 'lost' } as const;
-export type RideEnd = (typeof RideEnd)[keyof typeof RideEnd];
+import { RideEnd } from './ride/ride.types';
+import type { LatLng } from './geo/geo.types';
+import { MoveMode } from './route/route.types';
 
 interface Props {
   /** Kiralanan scooter; konumlar onun adına gider. */
@@ -60,6 +58,8 @@ export function DriverScreen({ scooterId, onRideEnded, onSessionExpired }: Props
    * "kiralama sona erdi" denmesin.
    */
   const releasing = useRef(false);
+  /** Bu kiralamada sürüşe başlandı mı: bitirirken konum gönderilir (sunucu park kuralı). */
+  const rode = useRef(false);
   const lost = useCallback(() => {
     if (!releasing.current) onRideEnded(RideEnd.LOST, scooterId);
   }, [onRideEnded, scooterId]);
@@ -85,7 +85,8 @@ export function DriverScreen({ scooterId, onRideEnded, onSessionExpired }: Props
     await outbox.drain();
     releasing.current = true;
     try {
-      await api.endRental();
+      const { lat, lng } = live.current;
+      await api.endRental(rode.current ? { lat, lng } : undefined);
       onRideEnded(RideEnd.RETURNED, scooterId);
     } catch (err) {
       releasing.current = false;
@@ -94,6 +95,9 @@ export function DriverScreen({ scooterId, onRideEnded, onSessionExpired }: Props
       if (err instanceof ApiError && err.status === 404) return lost();
       setEndError(`Scooter bırakılamadı: ${(err as Error).message}`);
       setEnding(false);
+      // 409: sunucu park kuralı (ör. uygulamadaki alan listesi eski). Sürüş sürer: sürücü
+      // park alanına gidip tekrar bitirir.
+      if (err instanceof ApiError && err.status === 409) setRiding(true);
     }
   };
 
@@ -103,6 +107,7 @@ export function DriverScreen({ scooterId, onRideEnded, onSessionExpired }: Props
       // Sürüş başlarken bağlantı her zaman açılır; önceki sürüşten biriken konumlar da gider.
       setOnline(true);
       setRiding(true);
+      rode.current = true;
       return;
     }
     const blocker = endRideBlocker(live.current, areas);

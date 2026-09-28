@@ -4,12 +4,6 @@ import type { NextFunction, Request, Response } from 'express';
 import { REQUEST_ID_PATTERN as REQUEST_ID } from '../../config/limits.js';
 import { httpRequestDuration } from '../../metrics/metrics.js';
 
-declare module 'express' {
-  interface Request {
-    id?: string;
-  }
-}
-
 /**
  * Her isteğe bir kimlik verir (gelen x-request-id korunur), süre metriğini kaydeder
  * ve erişim logu yazar. Erişim logu "verbose" seviyesindedir; yük altında log

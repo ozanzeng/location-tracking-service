@@ -1,6 +1,6 @@
 import { AreaType, type Area } from '@shared/api/types';
-import type { LatLng } from '../geo/latlng';
 import { areaToZone, distanceToZone, pointInZone, zonesOfType } from '../geo/zone';
+import type { LatLng } from '../geo/geo.types';
 
 /**
  * Sürüşün burada bitirilememe sebebi; bitirilebiliyorsa null.

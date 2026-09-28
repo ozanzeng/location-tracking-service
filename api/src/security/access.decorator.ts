@@ -1,18 +1,26 @@
 import { applyDecorators, SetMetadata } from '@nestjs/common';
 import { ApiBearerAuth } from '@nestjs/swagger';
 import { Access } from './access.enum.js';
-
-export const ACCESS = 'access';
+import { ACCESS } from './security.constants.js';
 
 /**
- * API anahtarı ya da sürücü oturumu. Swagger'da sürücü oturumu (Bearer) sadece bu uç noktalarda
- * görünür; işaretsiz uç noktalar yalnızca API anahtarı ister.
+ * Giriş yapmış herkes: API anahtarı, yönetici ya da sürücü. İşaretsiz uç noktalar API anahtarı
+ * ya da yönetici ister (Access.OPERATOR).
  */
 export const AllowRiders = () =>
   applyDecorators(
-    SetMetadata(ACCESS, Access.RIDER_OR_SERVICE),
+    SetMetadata(ACCESS, Access.ANY),
     ApiBearerAuth('rider'),
+    ApiBearerAuth('admin'),
   );
+
+/** Konum gönderenler: API anahtarı ya da sürücü. */
+export const DevicesOnly = () =>
+  applyDecorators(SetMetadata(ACCESS, Access.DEVICE), ApiBearerAuth('rider'));
+
+/** Sadece giriş yapmış yönetici. */
+export const AdminsOnly = () =>
+  applyDecorators(SetMetadata(ACCESS, Access.ADMIN), ApiBearerAuth('admin'));
 
 /** Sadece giriş yapmış sürücü. */
 export const RidersOnly = () =>

@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from 'react';
-import type { LatLng } from '../geo/latlng';
+import type { LatLng } from '../geo/geo.types';
 
 /**
  * Scooter'ın konumu iki katmanlı tutulur: `live` sürükleme ve oynatma sırasında her karede

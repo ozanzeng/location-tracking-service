@@ -11,13 +11,15 @@ import {
   closeRedis,
   throttledErrorLogger,
 } from '../common/redis/create-redis.js';
-import { APP_CONFIG, type AppConfig } from '../config/configuration.js';
 import { laneOf, laneQueueName } from './lanes.js';
+import type { LocationJobData, LanesRedis } from './queue.types.js';
 import {
   LEGACY_LOCATION_QUEUE,
   LOCATION_JOB,
-  type LocationJobData,
-} from './location-job.js';
+  LAYOUT_SCRIPT,
+} from './queue.constants.js';
+import type { AppConfig } from '../config/configuration.types.js';
+import { APP_CONFIG } from '../config/config.constants.js';
 
 /**
  * Kuyruğa eklenen işlerin ayarları. Tutma sınırları (QUEUE_KEEP_COMPLETED / _FAILED) tüm
@@ -40,19 +42,6 @@ export function laneJobOptions(
     removeOnFail: { count: Math.ceil(keep.keepFailed / queues) },
   };
 }
-
-/**
- * Kurulu şerit sayısını ilk açılan süreç yazar; sonrakiler aynı sayıyla açılmalı.
- * KEYS: düzen anahtarı. ARGV: şerit sayısı. Kayıtlı değeri döner.
- */
-const LAYOUT_SCRIPT = `
-redis.call('SET', KEYS[1], ARGV[1], 'NX')
-return redis.call('GET', KEYS[1])
-`;
-
-type LanesRedis = Redis & {
-  laneLayout(key: string, lanes: number): Promise<string>;
-};
 
 /** Şerit sayısı Redis'teki kurulumla uyuşmuyor: bazı şeritler hiç işlenmez ya da sıra bozulur. */
 export class LaneLayoutError extends Error {

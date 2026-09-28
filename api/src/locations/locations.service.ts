@@ -8,12 +8,13 @@ import { RentalsService } from '../fleet/rentals.service.js';
 import { ScooterRegistry } from '../fleet/scooter-registry.js';
 import { locationsAccepted } from '../metrics/metrics.js';
 import { LocationLanes } from '../queue/location-lanes.js';
-import type { LocationJobData } from '../queue/location-job.js';
-import { isRider, type Principal } from '../security/principal.js';
+import { isRider } from '../security/principal.js';
 import { UserRateLimiter } from '../security/user-rate-limiter.js';
 import type { CreateLocationDto } from './dto/create-location.dto.js';
 import { buildLocationJobs, FutureTimestampError } from './location-jobs.js';
 import { QueueBackpressure } from './queue-backpressure.js';
+import type { LocationJobData } from '../queue/queue.types.js';
+import type { Principal } from '../security/security.types.js';
 
 /**
  * Yazma tarafı: konumları doğrular, kapasite, gönderen ve kullanıcı sınırını kontrol eder,

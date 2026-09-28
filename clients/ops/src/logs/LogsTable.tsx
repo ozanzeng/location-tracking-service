@@ -2,7 +2,8 @@ import { memo } from 'react';
 import type { LogEntry } from '@shared/api/types';
 import { SignIcon } from '@shared/zones/SignIcon';
 import { formatAgo, formatDuration } from './duration';
-import { VisitStatus, visitStatus } from './visitStatus';
+import { visitStatus } from './visitStatus';
+import { VisitStatus } from './logs.types';
 
 const dateFmt = new Intl.DateTimeFormat('tr-TR', {
   day: '2-digit',

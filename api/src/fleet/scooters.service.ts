@@ -5,7 +5,7 @@ import {
 } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
-import { isRider, type Principal } from '../security/principal.js';
+import { isRider } from '../security/principal.js';
 import type { AreaType } from '../areas/area-type.enum.js';
 import { DeviceLog } from './device-log.js';
 import type { CreateScooterDto } from './dto/create-scooter.dto.js';
@@ -16,15 +16,8 @@ import { FleetEvents } from './fleet-events.js';
 import { FleetChange } from './fleet-change.enum.js';
 import { ScooterRegistry } from './scooter-registry.js';
 import { ScooterStatus } from './scooter-status.enum.js';
-
-interface ScooterRow {
-  id: string;
-  name: string;
-  rider_id: string | null;
-  username: string | null;
-  rented_since: Date | null;
-  last_seen_at: Date | null;
-}
+import type { ScooterRow } from './fleet.types.js';
+import type { Principal } from '../security/security.types.js';
 
 @Injectable()
 export class ScootersService {

@@ -1,13 +1,5 @@
-import { EventType, ExitReason, type AreaType, type LogEntry } from '@shared/api/types';
-
-export interface FeedItem {
-  key: string;
-  userId: string;
-  eventType: EventType;
-  areaName: string;
-  areaType: AreaType;
-  at: string;
-}
+import { EventType, ExitReason, type LogEntry } from '@shared/api/types';
+import type { FeedItem } from './live.types';
 
 /**
  * Giriş kayıtlarını olay akışına çevirir: her kayıt bir giriş, çıkış zamanı varsa bir de

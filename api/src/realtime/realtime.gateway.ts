@@ -12,38 +12,28 @@ import {
   WebSocketServer,
 } from '@nestjs/websockets';
 import type { Server, Socket } from 'socket.io';
-import { APP_CONFIG, type AppConfig } from '../config/configuration.js';
 import { USER_ID_MAX_LENGTH } from '../config/limits.js';
 import { RentalsService } from '../fleet/rentals.service.js';
-import { API_KEY_HEADER, isValidApiKey } from '../security/auth.guard.js';
-import {
-  isRider,
-  parseBearer,
-  type Principal,
-  SERVICE_PRINCIPAL,
-} from '../security/principal.js';
-import { RiderSessions } from '../security/rider-sessions.js';
+import { isValidApiKey } from '../security/auth.guard.js';
+import { isRider, parseBearer } from '../security/principal.js';
+import { Sessions } from '../security/sessions.js';
 import { PositionBuffer } from './position-buffer.js';
-import {
-  isUserRoom,
-  EVENTS_ROOM,
-  MONITOR_ROOM,
-  userRoom,
-  type GeofenceUpdateMessage,
-} from './realtime.constants.js';
+import { EVENTS_ROOM, MONITOR_ROOM } from './realtime.constants.js';
 import { RealtimeEvent } from './realtime-event.enum.js';
 import { RealtimeSubscriber } from './realtime.subscriber.js';
-
-interface SubscribePayload {
-  monitor?: boolean;
-  events?: boolean;
-  userId?: string;
-}
-
-interface ClientData {
-  /** El sıkışmadaki kimlik doğrulaması; mesajlar bunu bekler (bağlantı anında gelebilirler). */
-  auth?: Promise<Principal | null>;
-}
+import type {
+  GeofenceUpdateMessage,
+  SubscribePayload,
+  ClientData,
+} from './realtime.types.js';
+import { isUserRoom, userRoom } from './channels.js';
+import type { Principal } from '../security/security.types.js';
+import {
+  SERVICE_PRINCIPAL,
+  API_KEY_HEADER,
+} from '../security/security.constants.js';
+import type { AppConfig } from '../config/configuration.types.js';
+import { APP_CONFIG } from '../config/config.constants.js';
 
 /**
  * Socket.IO tarafı: istemciler odalara abone olur (operasyon: monitor ya da yalnızca olaylar için
@@ -64,7 +54,7 @@ export class RealtimeGateway
   constructor(
     @Inject(APP_CONFIG) private readonly config: AppConfig,
     private readonly subscriber: RealtimeSubscriber,
-    private readonly sessions: RiderSessions,
+    private readonly sessions: Sessions,
     private readonly rentals: RentalsService,
   ) {}
 
@@ -91,7 +81,7 @@ export class RealtimeGateway
   }
 
   /**
-   * HTTP ile aynı kimlik kuralı: sürücü oturumu (auth.token) ya da API anahtarı. Geçersizse
+   * HTTP ile aynı kimlik kuralı: oturum (auth.token; sürücü ya da yönetici) ya da API anahtarı. Geçersizse
    * bağlantı kapatılır.
    */
   handleConnection(client: Socket): void {
@@ -134,7 +124,8 @@ export class RealtimeGateway
     if ((payload?.monitor || payload?.events) && isRider(principal)) {
       return {
         ok: false,
-        error: 'filo aboneliği (monitor, events) API anahtarı ister',
+        error:
+          'filo aboneliği (monitor, events) API anahtarı ya da yönetici oturumu ister',
       };
     }
     if (payload?.monitor) void client.join(MONITOR_ROOM);

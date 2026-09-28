@@ -1,11 +1,16 @@
 import { Injectable } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
-import type { UserLocation } from '../queue/location-job.js';
-import { GeofenceRepository, type Transition } from './geofence.repository.js';
-import type { AreaEvent, AreaRef, ProcessResult } from './geofence.types.js';
+import { GeofenceRepository } from './geofence.repository.js';
+import type {
+  AreaEvent,
+  AreaRef,
+  ProcessResult,
+  Transition,
+} from './geofence.types.js';
 import { diffPresence } from './presence-diff.js';
 import { ProcessStatus } from './process-status.enum.js';
+import type { UserLocation } from '../queue/queue.types.js';
 
 @Injectable()
 export class GeofenceService {

@@ -11,7 +11,7 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, test } from 'node:test';
 import { chromium } from 'playwright-core';
-import { newRider, OPS_URL, registerScooter, signInAndRent, startRide } from './driverSession.mjs';
+import { newRider, OPS_URL, registerScooter, signInAndRent, signInOps, startRide } from './driverSession.mjs';
 
 const GPS_WAIT = 12_000; // 5 sn örnekleme + kuyruk + canlı yayın payı
 
@@ -53,6 +53,7 @@ before(async () => {
     else ops = page;
   }
   scooterId = await registerScooter('exchange');
+  await signInOps(ops);
   await ops.goto(`${OPS_URL}/#/live`);
   await ops.waitForSelector('.live:not(.live--off)');
   await signInAndRent(driver, await newRider('exchange'), scooterId);

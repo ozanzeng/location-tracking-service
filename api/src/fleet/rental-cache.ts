@@ -6,11 +6,10 @@ import {
 } from '@nestjs/common';
 import type { Redis } from 'ioredis';
 import { closeRedis, createRedis } from '../common/redis/create-redis.js';
-import { APP_CONFIG, type AppConfig } from '../config/configuration.js';
 import { RENTAL_CACHE_TTL_SECONDS } from '../config/limits.js';
-
-/** Önbellekte "aktif kiralama yok". */
-const NONE = '-';
+import { RENTAL_CACHE_NONE } from './fleet.constants.js';
+import type { AppConfig } from '../config/configuration.types.js';
+import { APP_CONFIG } from '../config/config.constants.js';
 
 /**
  * Sürücünün kiraladığı scooter, Redis'te kısa süreli (RENTAL_CACHE_TTL_SECONDS). Sürücünün her
@@ -39,7 +38,7 @@ export class RentalCache implements OnApplicationShutdown {
     load: () => Promise<string | null>,
   ): Promise<string | null> {
     const cached = await this.redis.get(this.key(riderId));
-    if (cached !== null) return cached === NONE ? null : cached;
+    if (cached !== null) return cached === RENTAL_CACHE_NONE ? null : cached;
     const scooterId = await load();
     await this.set(riderId, scooterId);
     return scooterId;
@@ -54,7 +53,7 @@ export class RentalCache implements OnApplicationShutdown {
     try {
       await this.redis.set(
         key,
-        scooterId ?? NONE,
+        scooterId ?? RENTAL_CACHE_NONE,
         'EX',
         RENTAL_CACHE_TTL_SECONDS,
       );

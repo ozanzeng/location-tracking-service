@@ -1,10 +1,10 @@
 import type { DataSourceOptions } from 'typeorm';
-import type { AppConfig } from '../config/configuration.js';
 import { Area } from '../areas/area.entity.js';
 import { AreaLog } from '../logs/area-log.entity.js';
 import { UserLastLocation } from '../geofence/user-last-location.entity.js';
 import { Rental } from '../fleet/rental.entity.js';
 import { Scooter } from '../fleet/scooter.entity.js';
+import { Admin } from '../admins/admin.entity.js';
 import { Rider } from '../riders/rider.entity.js';
 import { Init1727000000000 } from './migrations/1727000000000-Init.js';
 import { OpenVisitIndexAndHotUpdates1727100000000 } from './migrations/1727100000000-OpenVisitIndexAndHotUpdates.js';
@@ -15,6 +15,8 @@ import { FleetAndRiders1727500000000 } from './migrations/1727500000000-FleetAnd
 import { AreaEdits1727600000000 } from './migrations/1727600000000-AreaEdits.js';
 import { RentalHistoryIndex1727700000000 } from './migrations/1727700000000-RentalHistoryIndex.js';
 import { UnifyExitReason1727800000000 } from './migrations/1727800000000-UnifyExitReason.js';
+import { Admins1727900000000 } from './migrations/1727900000000-Admins.js';
+import type { AppConfig } from '../config/configuration.types.js';
 
 export const ENTITIES = [
   Area,
@@ -23,6 +25,7 @@ export const ENTITIES = [
   Scooter,
   Rider,
   Rental,
+  Admin,
 ];
 export const MIGRATIONS = [
   Init1727000000000,
@@ -34,6 +37,7 @@ export const MIGRATIONS = [
   AreaEdits1727600000000,
   RentalHistoryIndex1727700000000,
   UnifyExitReason1727800000000,
+  Admins1727900000000,
 ];
 
 /**

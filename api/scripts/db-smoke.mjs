@@ -48,10 +48,19 @@ await step('bekleyen migration yok', async () => {
   return `${n} migration uygulanmış`;
 });
 
+await step('uygulanmış migration’ların hepsi kodda var', async () => {
+  // Uygulanmış bir migration'ın adı ya da numarası kodda değiştirilirse TypeORM onu yeni
+  // sanıp yeniden çalıştırmaya kalkar (README, "Migration kuralları").
+  const known = new Set(ds.migrations.map((m) => m.name));
+  const applied = await ds.query(`SELECT name FROM migrations ORDER BY id`);
+  const unknown = applied.map((r) => r.name).filter((name) => !known.has(name));
+  expect(unknown.length === 0, `kodda olmayan migration: ${unknown.join(', ')} (yeniden adlandırılmış olabilir)`);
+});
+
 await step('tablolar ve index’ler', async () => {
   const rows = await ds.query(
     `SELECT indexname FROM pg_indexes WHERE schemaname = 'public'
-       AND tablename IN ('areas', 'area_logs', 'user_last_location', 'scooters', 'riders', 'rentals')`,
+       AND tablename IN ('areas', 'area_logs', 'user_last_location', 'scooters', 'riders', 'rentals', 'admins')`,
   );
   const names = new Set(rows.map((r) => r.indexname));
   const required = [
@@ -66,6 +75,7 @@ await step('tablolar ve index’ler', async () => {
     // adı. Bunlar olmadan iki sürücü aynı scooter'ı alabilirdi.
     'scooters_pkey',
     'riders_username_uq',
+    'admins_username_uq',
     'rentals_active_scooter_uq',
     'rentals_active_rider_uq',
     'rentals_scooter_history_idx',

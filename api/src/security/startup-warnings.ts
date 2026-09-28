@@ -1,4 +1,4 @@
-import type { AppConfig } from '../config/configuration.js';
+import type { AppConfig } from '../config/configuration.types.js';
 
 /**
  * API açılışında loglanan ayar uyarıları. Servis çalışır, ama yerel geliştirmede sessizce

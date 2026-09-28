@@ -12,10 +12,12 @@ import type { Redis } from 'ioredis';
 import { DataSource } from 'typeorm';
 import { closeRedis, createRedis } from '../common/redis/create-redis.js';
 import { RetryableHttpException } from '../common/http/retryable.exception.js';
-import { APP_CONFIG, type AppConfig } from '../config/configuration.js';
 import { SCOOTER_REGISTRY_REFRESH_MS } from '../config/limits.js';
 import { FleetChange } from './fleet-change.enum.js';
-import { fleetChannel, type FleetChangedMessage } from './fleet.constants.js';
+import type { FleetChangedMessage } from './fleet.types.js';
+import { fleetChannel } from './fleet-events.js';
+import type { AppConfig } from '../config/configuration.types.js';
+import { APP_CONFIG } from '../config/config.constants.js';
 
 /**
  * Kayıtlı (silinmemiş) scooter kimlikleri, her API instance'ının belleğinde. Konum isteği bu

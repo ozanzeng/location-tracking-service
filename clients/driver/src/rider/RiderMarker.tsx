@@ -2,18 +2,11 @@ import { useEffect, useMemo, useRef, type RefObject } from 'react';
 import L from 'leaflet';
 import { Marker } from 'react-leaflet';
 import { SNAP_METERS } from '../config';
-import type { LatLng } from '../geo/latlng';
-import type { Restrictions, RoadNetwork } from '../roads/RoadNetwork';
-import type { RiderZone } from './riderZone';
-
-// Tek ikon: rengi değiştirmek için ikonu yenilemek Leaflet'te sürüklemeyi keser,
-// bu yüzden bölge bilgisi elemana data-zone olarak yazılır.
-const RIDER_ICON = L.divIcon({
-  className: 'rider',
-  html: '<span></span>',
-  iconSize: [30, 30],
-  iconAnchor: [15, 15],
-});
+import type { RoadNetwork } from '../roads/RoadNetwork';
+import type { LatLng } from '../geo/geo.types';
+import { RIDER_ICON } from './rider.constants';
+import type { RiderZone } from './rider.types';
+import type { Restrictions } from '../roads/roads.types';
 
 interface Props {
   position: LatLng;

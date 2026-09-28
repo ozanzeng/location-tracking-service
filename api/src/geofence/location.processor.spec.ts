@@ -1,14 +1,15 @@
 import type { DeviceLog } from '../fleet/device-log.js';
 import type { Job } from 'bullmq';
 import { AreaType } from '../areas/area-type.enum.js';
-import { type AppConfig, loadConfig } from '../config/configuration.js';
-import type { LocationJobData } from '../queue/location-job.js';
+import { loadConfig } from '../config/configuration.js';
 import type { RealtimePublisher } from '../realtime/realtime.publisher.js';
 import type { GeofenceService } from './geofence.service.js';
 import { AreaEventType } from './area-event-type.enum.js';
 import type { ProcessResult } from './geofence.types.js';
 import { LocationProcessor } from './location.processor.js';
 import { ProcessStatus } from './process-status.enum.js';
+import type { LocationJobData } from '../queue/queue.types.js';
+import type { AppConfig } from '../config/configuration.types.js';
 
 const base = loadConfig({});
 

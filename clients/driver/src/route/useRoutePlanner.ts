@@ -1,23 +1,10 @@
 import { useCallback, useMemo, useState, type RefObject } from 'react';
 import { START_SNAP_METERS } from '../config';
-import { pathLength, type LatLng } from '../geo/latlng';
-import type { Restrictions, RoadNetwork, Snap } from '../roads/RoadNetwork';
-
-interface Route {
-  /** Scooter'ın rota çizimine başlandığı andaki yol noktası. */
-  start: Snap;
-  stops: Snap[];
-  /** start → stops[0] → stops[1] ... arasındaki yol parçaları. */
-  legs: LatLng[][];
-}
-
-export const NoticeKind = { INFO: 'info', ERROR: 'error' } as const;
-export type NoticeKind = (typeof NoticeKind)[keyof typeof NoticeKind];
-
-export interface RouteNotice {
-  text: string;
-  kind: NoticeKind;
-}
+import { pathLength } from '../geo/latlng';
+import type { RoadNetwork } from '../roads/RoadNetwork';
+import type { LatLng } from '../geo/geo.types';
+import type { Restrictions, Snap } from '../roads/roads.types';
+import { type Route, NoticeKind, type RouteNotice } from './route.types';
 
 /**
  * Rota planlama: duraklar yollara yapışır, aralarındaki rota yol ağı üzerinden hesaplanır

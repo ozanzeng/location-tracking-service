@@ -14,4 +14,5 @@ COPY --from=build /app/dist ./dist
 USER node
 EXPOSE 3000
 # Aynı imaj üç rolde çalışır: API (varsayılan), worker ve migrate (compose'da command ile).
-CMD ["node", "dist/main.js"]
+# tracing.js: OTEL_EXPORTER_OTLP_ENDPOINT verilirse OpenTelemetry'yi açar, yoksa hiçbir şey yapmaz.
+CMD ["node", "--import", "./dist/tracing.js", "dist/main.js"]

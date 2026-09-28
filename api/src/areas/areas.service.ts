@@ -14,13 +14,7 @@ import { Area } from './area.entity.js';
 import type { CreateAreaDto } from './dto/create-area.dto.js';
 import type { UpdateAreaDto } from './dto/update-area.dto.js';
 import type { AreaType } from './area-type.enum.js';
-
-/** Alan düzenlenince ya da silinince kapatılan giriş kaydı. */
-interface ClosedVisit {
-  id: string;
-  user_id: string;
-  exit_time: Date;
-}
+import type { ClosedVisit } from './areas.types.js';
 
 @Injectable()
 export class AreasService {

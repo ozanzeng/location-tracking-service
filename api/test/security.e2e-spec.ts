@@ -8,6 +8,7 @@ import {
   createTestApp,
   INSIDE,
   registerRider,
+  MODA_SQUARE,
   rentScooter,
   resetState,
   waitForQueueDrain,
@@ -126,6 +127,13 @@ describe('Güvenlik ve gözlemlenebilirlik (e2e)', () => {
         .delete(`/areas/${areaId}`)
         .set('authorization', bearer)
         .expect(403);
+      // Sürüş park alanında biter: scooter'ın son konumu bir park alanının içinde.
+      await post('/areas', {
+        name: 'Güvenlik testi parkı',
+        type: 'PARKING',
+        geometry: MODA_SQUARE,
+      }).expect(201);
+      await waitForQueueDrain(app);
       await request(server)
         .post('/rentals/current/end')
         .set('authorization', bearer)
@@ -140,8 +148,14 @@ describe('Güvenlik ve gözlemlenebilirlik (e2e)', () => {
         .expect(401);
     });
 
-    it('health ve metrics anahtar istemez', async () => {
+    it('health, liveness, readiness ve metrics anahtar istemez', async () => {
       await request(app.getHttpServer()).get('/health').expect(200);
+      await request(app.getHttpServer())
+        .get('/health/live')
+        .expect(200, { status: 'ok' });
+      await request(app.getHttpServer())
+        .get('/health/ready')
+        .expect(200, { status: 'ok', database: 'up', redis: 'up' });
       await request(app.getHttpServer()).get('/metrics').expect(200);
     });
   });

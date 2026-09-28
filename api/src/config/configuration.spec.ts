@@ -1,5 +1,7 @@
-import { ConfigError, loadConfig } from './configuration.js';
+import { loadConfig } from './configuration.js';
 import { corsOrigin } from './cors.js';
+import { ConfigError } from './config-error.js';
+import { DEMO_ADMIN_PASSWORD } from './limits.js';
 
 describe('loadConfig güvenlik varsayılanları', () => {
   it('production’da CORS varsayılan olarak kapalıdır', () => {
@@ -185,5 +187,42 @@ describe('loadConfig doğrulama', () => {
       loadConfig({ DB_STATEMENT_TIMEOUT_MS: '0' }).db.statementTimeoutMs,
     ).toBe(0);
     expect(problemsFor({ DB_STATEMENT_TIMEOUT_MS: '-1' })).toHaveLength(1);
+  });
+
+  it('ilk yönetici: ad ve şifre birlikte, şifre en az 12 karakter; production’da demo şifresi reddedilir', () => {
+    expect(loadConfig({}).security.initialAdmin).toBeUndefined();
+    expect(
+      loadConfig({
+        ADMIN_USERNAME: ' Ayse ',
+        ADMIN_PASSWORD: 'uzun-bir-sifre-1',
+      }).security.initialAdmin,
+    ).toEqual({ username: 'ayse', password: 'uzun-bir-sifre-1' });
+    expect(problemsFor({ ADMIN_USERNAME: 'ayse' })).toEqual([
+      expect.stringMatching(/ADMIN_PASSWORD 12–128/),
+    ]);
+    expect(problemsFor({ ADMIN_PASSWORD: 'uzun-bir-sifre-1' })).toEqual([
+      expect.stringMatching(/ADMIN_USERNAME/),
+    ]);
+    expect(
+      problemsFor({ ADMIN_USERNAME: 'ayse', ADMIN_PASSWORD: 'kisa' }),
+    ).toHaveLength(1);
+    expect(
+      problemsFor({
+        NODE_ENV: 'production',
+        ADMIN_USERNAME: 'admin',
+        ADMIN_PASSWORD: DEMO_ADMIN_PASSWORD,
+      }),
+    ).toEqual([expect.stringMatching(/demo şifresi/)]);
+    expect(loadConfig({}).security.adminSessionTtlSeconds).toBe(12 * 3600);
+  });
+
+  it('kayıt saklama: varsayılan 365 gün, 0 kapatır; tur aralığı en az 1 dk', () => {
+    expect(loadConfig({}).retention).toEqual({
+      logDays: 365,
+      intervalMs: 3_600_000,
+    });
+    expect(loadConfig({ LOG_RETENTION_DAYS: '0' }).retention.logDays).toBe(0);
+    expect(problemsFor({ LOG_RETENTION_DAYS: '-1' })).toHaveLength(1);
+    expect(problemsFor({ LOG_RETENTION_INTERVAL_MS: '1000' })).toHaveLength(1);
   });
 });

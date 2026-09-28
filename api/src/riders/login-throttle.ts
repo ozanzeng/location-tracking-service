@@ -7,8 +7,9 @@ import {
 import type { Redis } from 'ioredis';
 import { closeRedis, createRedis } from '../common/redis/create-redis.js';
 import { RetryableHttpException } from '../common/http/retryable.exception.js';
-import { APP_CONFIG, type AppConfig } from '../config/configuration.js';
 import { LOGIN_WINDOW_SECONDS } from '../config/limits.js';
+import type { AppConfig } from '../config/configuration.types.js';
+import { APP_CONFIG } from '../config/config.constants.js';
 
 /**
  * Kaba kuvvetle şifre denemesine karşı: kullanıcı adı başına başarısız giriş sayısı, 15

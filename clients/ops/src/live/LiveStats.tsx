@@ -1,4 +1,4 @@
-import type { Counts } from './scooterCounts';
+import type { Counts } from './live.types';
 
 /** Anlık sayaçlar: aktif scooter, sürüş yasak bölgede ve hizmet bölgesi dışında olanlar. */
 export function LiveStats({ counts }: { counts: Counts }) {

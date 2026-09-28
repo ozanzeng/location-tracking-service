@@ -7,10 +7,10 @@ import { Legend } from '@shared/zones/Legend';
 import { EventFeed } from './EventFeed';
 import { LiveStats } from './LiveStats';
 import { MapRef } from './MapRef';
-import { ScooterLayer, type Scooter } from './ScooterLayer';
-import type { Counts } from './scooterCounts';
+import { ScooterLayer } from './ScooterLayer';
 import { useEventFeed } from './useEventFeed';
 import { useSocketConnected } from './useSocketConnected';
+import type { Scooter, Counts } from './live.types';
 
 /** Canlı izleme: aktif scooter'lar haritada, yanında sayaçlar ve giriş/çıkış akışı. */
 export function LiveMap() {

@@ -33,3 +33,26 @@ export type ProcessResult =
       events: AreaEvent[];
       position: PositionUpdate;
     };
+
+/** İşlemeye başlamadan önceki durum. */
+export interface GeofenceState {
+  /** Kullanıcının en son işlenen konumunun zamanı. */
+  lastRecordedAt: Date | null;
+  /** Yeni konumu içeren alanlar. */
+  inside: AreaRef[];
+  /** Açık girişi olan (şu an içinde bulunulan) alanlar. */
+  present: AreaRef[];
+}
+
+/** Bir konumun ürettiği giriş ya da çıkış. */
+export interface Transition {
+  logId: string;
+  areaId: string;
+  eventType: AreaEventType;
+}
+
+/** Önceki ve yeni alanlar arasındaki fark. */
+export interface PresenceDiff {
+  entered: string[];
+  exited: string[];
+}

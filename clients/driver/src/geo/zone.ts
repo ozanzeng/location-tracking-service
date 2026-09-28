@@ -1,8 +1,7 @@
 import type { Area, AreaType } from '@shared/api/types';
-import { M_PER_DEG_LAT, mPerDegLng, type LatLng } from './latlng';
-
-/** Halkalar: ilki dış sınır, sonrakiler delikler (GeoJSON Polygon gibi). */
-export type Zone = LatLng[][];
+import { mPerDegLng } from './latlng';
+import type { LatLng, Zone } from './geo.types';
+import { M_PER_DEG_LAT } from './geo.constants';
 
 /** GeoJSON [boylam, enlem] halkalarını bölgeye çevirir. */
 export const areaToZone = (area: Area): Zone =>

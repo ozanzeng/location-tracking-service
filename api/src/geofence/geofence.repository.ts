@@ -1,24 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import type { EntityManager } from 'typeorm';
-import type { UserLocation } from '../queue/location-job.js';
 import type { AreaEventType } from './area-event-type.enum.js';
-import type { AreaRef } from './geofence.types.js';
-
-/** İşlemeye başlamadan önceki durum. */
-export interface GeofenceState {
-  /** Kullanıcının en son işlenen konumunun zamanı. */
-  lastRecordedAt: Date | null;
-  /** Yeni konumu içeren alanlar. */
-  inside: AreaRef[];
-  /** Açık girişi olan (şu an içinde bulunulan) alanlar. */
-  present: AreaRef[];
-}
-
-export interface Transition {
-  logId: string;
-  areaId: string;
-  eventType: AreaEventType;
-}
+import type { AreaRef, GeofenceState, Transition } from './geofence.types.js';
+import type { UserLocation } from '../queue/queue.types.js';
 
 /**
  * Konum işlemenin SQL tarafı. Metodlar çağıranın transaction'ı içinde çalışır

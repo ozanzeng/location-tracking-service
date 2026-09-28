@@ -2,15 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import type { AreaRef } from '../geofence/geofence.types.js';
-
-export interface LatestPosition {
-  userId: string;
-  lat: number;
-  lng: number;
-  recordedAt: string;
-  /** Kullanıcının şu an içinde bulunduğu alanlar (açık girişler). */
-  areas: AreaRef[];
-}
+import type { LatestPosition } from './locations.types.js';
 
 /** Okuma tarafı: canlı izleme ekranının ilk yüklemesi için son bilinen konumlar. */
 @Injectable()

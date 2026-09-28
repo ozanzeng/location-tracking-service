@@ -1,12 +1,7 @@
 import { MAX_CLOCK_SKEW_MS } from '../config/limits.js';
-import type { LocationJobData } from '../queue/location-job.js';
-
-export interface IncomingLocation {
-  userId: string;
-  lat: number;
-  lng: number;
-  timestamp: string;
-}
+import { currentTraceCarrier } from '../common/tracing/trace-context.js';
+import type { IncomingLocation } from './locations.types.js';
+import type { LocationJobData } from '../queue/queue.types.js';
 
 /** İleri tarihli konum: sonraki gerçek konumların "eski" sayılıp atlanmasına yol açardı. */
 export class FutureTimestampError extends Error {
@@ -27,6 +22,7 @@ export function buildLocationJobs(
   now: Date,
 ): LocationJobData[] {
   const byUser = new Map<string, LocationJobData>();
+  const trace = currentTraceCarrier();
   locations.forEach((location, i) => {
     const recordedAt = new Date(location.timestamp);
     if (recordedAt.getTime() > now.getTime() + MAX_CLOCK_SKEW_MS) {
@@ -35,6 +31,7 @@ export function buildLocationJobs(
     let job = byUser.get(location.userId);
     if (!job) {
       job = { userId: location.userId, points: [], requestId };
+      if (trace) job.trace = trace;
       byUser.set(location.userId, job);
     }
     job.points.push({

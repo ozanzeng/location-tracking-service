@@ -12,14 +12,14 @@ import {
 } from '@nestjs/swagger';
 import { ApiKeyAuth } from '../security/api-key-auth.decorator.js';
 import { RequestId } from '../common/http/request-id.decorator.js';
-import { AllowRiders } from '../security/access.decorator.js';
+import { DevicesOnly } from '../security/access.decorator.js';
 import { CurrentPrincipal } from '../security/current-rider.decorator.js';
-import type { Principal } from '../security/principal.js';
 import { CreateLocationBatchDto } from './dto/create-location-batch.dto.js';
 import { CreateLocationDto } from './dto/create-location.dto.js';
 import { LatestLocationsQueryDto } from './dto/latest-query.dto.js';
 import { LatestLocationsService } from './latest-locations.service.js';
 import { LocationsService } from './locations.service.js';
+import type { Principal } from '../security/security.types.js';
 
 @ApiTags('locations')
 @ApiKeyAuth()
@@ -47,7 +47,7 @@ export class LocationsController {
   ) {}
 
   @Post()
-  @AllowRiders()
+  @DevicesOnly()
   @HttpCode(202)
   @ApiOperation({
     summary: 'Konum bildir',
@@ -69,7 +69,7 @@ export class LocationsController {
   }
 
   @Post('batch')
-  @AllowRiders()
+  @DevicesOnly()
   @HttpCode(202)
   @ApiOperation({
     summary: 'Toplu konum bildir',

@@ -1,12 +1,5 @@
 import { AreaType } from '../api/types';
-
-interface ZoneStyle {
-  label: string;
-  color: string;
-  fill: string;
-  fillOpacity: number;
-  dashArray?: string;
-}
+import type { ZoneStyle } from './zones.types';
 
 export const ZONES: Record<AreaType, ZoneStyle> = {
   [AreaType.NO_RIDE]: { label: 'Sürüş yasak', color: '#B81D31', fill: '#D7263D', fillOpacity: 0.28 },
@@ -36,9 +29,3 @@ export const ZONE_ORDER: AreaType[] = [
   AreaType.PARKING,
   AreaType.SERVICE,
 ];
-
-/** Scooter'ın rengini içinde bulunduğu en kısıtlayıcı bölge belirler. */
-export function dominantZone(types: Iterable<AreaType>): AreaType | null {
-  const set = new Set(types);
-  return ZONE_ORDER.find((t) => set.has(t)) ?? null;
-}

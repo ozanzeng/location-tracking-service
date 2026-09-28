@@ -3,7 +3,7 @@ import type { AreaEvent, AreaRef, Position } from '@shared/api/types';
 import { SocketEvent } from '@shared/realtime/events';
 import { getSocket } from '@shared/realtime/socket';
 import { PLATE_MS } from '../config';
-import type { PlateItem } from './SignPlate';
+import type { PlateItem } from './rider.types';
 
 /**
  * Sunucudan bu scooter'a özel olaylar: bölge giriş/çıkış bildirimleri (levha olarak gösterilir)

@@ -1,4 +1,5 @@
-import { SignPlate, type PlateItem } from './SignPlate';
+import { SignPlate } from './SignPlate';
+import type { PlateItem } from './rider.types';
 
 /** Haritanın üstündeki bildirim levhaları; en yenisi en üstte. */
 export function PlateStack({ plates, onDismiss }: { plates: PlateItem[]; onDismiss: (key: string) => void }) {

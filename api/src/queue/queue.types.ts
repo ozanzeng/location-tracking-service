@@ -1,9 +1,5 @@
-/**
- * Şeritlerden önceki tek kuyruk. Redis AOF ile kalıcı olduğu için güncelleme sırasında
- * içinde iş kalmış olabilir; worker'lar onu da (şerit gibi, tek tek) işler.
- */
-export const LEGACY_LOCATION_QUEUE = 'locations';
-export const LOCATION_JOB = 'location';
+import type { TraceCarrier } from '../common/tracing/tracing.types.js';
+import { Redis } from 'ioredis';
 
 export interface LocationPoint {
   lat: number;
@@ -22,9 +18,16 @@ export interface LocationJobData {
   points: LocationPoint[];
   /** İsteği worker loglarında izleyebilmek için API'deki istek kimliği. */
   requestId?: string;
+  /** Dağıtık izleme açıksa isteğin trace bağlamı: worker'daki işlem aynı izde görünür. */
+  trace?: TraceCarrier;
 }
 
 /** Worker'ın tek bir noktayı işlerken kullandığı biçim. */
 export interface UserLocation extends LocationPoint {
   userId: string;
 }
+
+/** Şerit düzeni Lua betiği tanımlanmış Redis bağlantısı. */
+export type LanesRedis = Redis & {
+  laneLayout(key: string, lanes: number): Promise<string>;
+};

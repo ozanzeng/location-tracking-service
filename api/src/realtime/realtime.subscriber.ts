@@ -7,19 +7,16 @@ import {
 } from '@nestjs/common';
 import type { Redis } from 'ioredis';
 import { closeRedis, createRedis } from '../common/redis/create-redis.js';
-import { APP_CONFIG, type AppConfig } from '../config/configuration.js';
-import {
-  fleetChannel,
-  type FleetChangedMessage,
-} from '../fleet/fleet.constants.js';
-import {
-  areasChannel,
-  updatesChannel,
-  type AreasChangedMessage,
-  type GeofenceUpdateMessage,
-} from './realtime.constants.js';
-
-type Handler<T> = (message: T) => void;
+import type { FleetChangedMessage } from '../fleet/fleet.types.js';
+import { fleetChannel } from '../fleet/fleet-events.js';
+import type {
+  AreasChangedMessage,
+  GeofenceUpdateMessage,
+  Handler,
+} from './realtime.types.js';
+import { areasChannel, updatesChannel } from './channels.js';
+import type { AppConfig } from '../config/configuration.types.js';
+import { APP_CONFIG } from '../config/config.constants.js';
 
 /**
  * Worker'ların ve diğer API instance'larının Redis'e yayınladığı mesajları dinler.

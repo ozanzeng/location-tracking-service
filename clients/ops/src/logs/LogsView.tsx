@@ -3,10 +3,12 @@ import { useAreas } from '@shared/hooks/useAreas';
 import { useScooters } from '@shared/hooks/useScooters';
 import { ScooterDrawer } from '../fleet/ScooterDrawer';
 import { LOGS_CLOCK_MS } from '../config';
-import { EMPTY_FILTERS, isEmpty, type LogFilters } from './logFilters';
+import { isEmpty } from './logFilters';
 import { LogFiltersForm } from './LogFiltersForm';
 import { LogsTable } from './LogsTable';
 import { useLogs } from './useLogs';
+import type { LogFilters } from './logs.types';
+import { EMPTY_FILTERS } from './logs.constants';
 
 /**
  * GET /logs: alan giriş kayıtları; filtreler ve cursor ile sayfalama. Satırdaki scooter'a

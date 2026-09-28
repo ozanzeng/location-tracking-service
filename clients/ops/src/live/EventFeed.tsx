@@ -1,7 +1,7 @@
 import { memo } from 'react';
 import { EventType } from '@shared/api/types';
 import { SignIcon } from '@shared/zones/SignIcon';
-import type { FeedItem } from './logsToFeed';
+import type { FeedItem } from './live.types';
 
 const timeFmt = new Intl.DateTimeFormat('tr-TR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 

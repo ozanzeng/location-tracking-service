@@ -1,5 +1,5 @@
 import { AreaType } from '@shared/api/types';
-import { dominantZone } from '@shared/zones/zoneStyles';
+import { dominantZone } from '@shared/zones/dominantZone';
 
 /**
  * Hizmet bölgesi dışında mı? Sürüş yasak bölge hizmet bölgesinin dışına taşabilir; orada

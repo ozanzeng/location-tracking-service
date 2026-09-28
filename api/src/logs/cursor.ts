@@ -1,10 +1,6 @@
 import { isApiTimestamp } from '../common/validation/api-timestamp.js';
 import { MAX_LOG_ID } from '../config/limits.js';
-
-export interface LogCursor {
-  entryTime: string;
-  id: string;
-}
+import type { LogCursor } from './logs.types.js';
 
 /** (entry_time, id) çiftini opak bir sayfalama imlecine çevirir. */
 export function encodeCursor(cursor: LogCursor): string {

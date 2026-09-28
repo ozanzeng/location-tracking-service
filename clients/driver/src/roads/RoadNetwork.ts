@@ -1,6 +1,11 @@
-import { distance, M_PER_DEG_LAT, metersBetween, mPerDegLng, pathLength, type LatLng } from '../geo/latlng';
-import { pointInZone, type Zone } from '../geo/zone';
+import { distance, metersBetween, mPerDegLng, pathLength } from '../geo/latlng';
+import { pointInZone } from '../geo/zone';
 import { MinHeap } from './minHeap';
+import type { LatLng, Zone } from '../geo/geo.types';
+import { M_PER_DEG_LAT } from '../geo/geo.constants';
+import type { Snap, CompactRoads, Restrictions } from './roads.types';
+import { CELL_DEG, GEOMETRY_EPS, ENTRY_DISTANCE_WEIGHT, ENTRY_CANDIDATES } from '../config';
+import { intersect } from './geometry';
 
 /**
  * Yol ağı: tıklanan/sürüklenen noktayı en yakın yola yapıştırır ve iki nokta arasında
@@ -8,54 +13,6 @@ import { MinHeap } from './minHeap';
  * bölgelere girmez; hedef bölgenin içindeyse rota bölgenin sınırında biter.
  * Veri scripts/fetch-roads.mjs ile OpenStreetMap'ten üretilir (public/roads-kadikoy.json).
  */
-
-/** Yol üzerindeki bir nokta: a→b parçasının t oranındaki yeri. */
-export interface Snap {
-  point: LatLng;
-  segment: number;
-  a: number;
-  b: number;
-  t: number;
-  /** Tıklanan noktanın yola uzaklığı (m). */
-  distance: number;
-}
-
-export interface CompactRoads {
-  nodes: number[];
-  ways: number[][];
-}
-
-/** restrict() çıktısı: yasak bölgelere göre kapalı yollar ve bölge giriş noktaları. */
-export interface Restrictions {
-  zones: Zone[];
-  /** Bölgelerden birinin içindeki düğümler. */
-  blockedNode: Uint8Array;
-  /** Parça → bölge sınırını kestiği yerler (t, 0..1, sıralı). */
-  cuts: Map<number, number[]>;
-  /** Bölge → yolun bölgeye girdiği sınır noktaları. */
-  entries: Map<number, Snap[]>;
-}
-
-/** Izgara hücresi ~110 m; yakın yol ararken sadece çevredeki hücrelere bakılır. */
-const CELL_DEG = 0.001;
-/** Sınır noktalarının kendisi yolun "dışı" sayılsın diye kesişim karşılaştırmasında pay. */
-const EPS = 1e-9;
-/** Bölge içindeki hedefte: sınır noktası tıklanan yere uzaksa bu katsayıyla cezalandırılır. */
-const ENTRY_DISTANCE_WEIGHT = 2;
-const ENTRY_CANDIDATES = 6;
-
-/** p→q parçasının r→s ile kesiştiği yer (p→q üzerinde 0..1) ya da null. */
-function intersect(p: LatLng, q: LatLng, r: LatLng, s: LatLng): number | null {
-  const d1x = q.lng - p.lng;
-  const d1y = q.lat - p.lat;
-  const d2x = s.lng - r.lng;
-  const d2y = s.lat - r.lat;
-  const denom = d1x * d2y - d1y * d2x;
-  if (Math.abs(denom) < 1e-18) return null;
-  const t = ((r.lng - p.lng) * d2y - (r.lat - p.lat) * d2x) / denom;
-  const u = ((r.lng - p.lng) * d1y - (r.lat - p.lat) * d1x) / denom;
-  return t >= 0 && t <= 1 && u >= 0 && u <= 1 ? t : null;
-}
 
 export class RoadNetwork {
   private readonly lat: Float64Array;
@@ -223,8 +180,8 @@ export class RoadNetwork {
   /** Parçanın t1..t2 arası yasak bölge sınırını kesmiyor mu (uçlar hariç)? */
   private clear(segment: number, t1: number, t2: number, r?: Restrictions): boolean {
     if (!r) return true;
-    const lo = Math.min(t1, t2) + EPS;
-    const hi = Math.max(t1, t2) - EPS;
+    const lo = Math.min(t1, t2) + GEOMETRY_EPS;
+    const hi = Math.max(t1, t2) - GEOMETRY_EPS;
     return !(r.cuts.get(segment) ?? []).some((t) => t > lo && t < hi);
   }
 

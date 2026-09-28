@@ -18,24 +18,32 @@ x-api-env: &api-env
   REDIS_URL: redis://redis:6379
   # Kullanıcı şeritleri: aynı anda en fazla bu kadar iş işlenir. API ve worker'da aynı olmalı.
   QUEUE_LANES: 64
-  # Yerel demo anahtarı (operasyon, betikler, mobil backend); gerçek ortamda secret olarak
-  # verilmeli. Sürücüler anahtar kullanmaz: kullanıcı adı ve şifreyle giriş yapar.
+  # Yerel demo anahtarı (betikler, mobil backend, filo sistemi); gerçek ortamda secret olarak
+  # verilmeli. Tarayıcı uygulamaları anahtar kullanmaz: sürücüler ve yöneticiler kullanıcı adı
+  # ve şifreyle giriş yapar.
   API_KEYS: ${API_KEY:-dev-api-key}
   RATE_LIMIT_USER_PER_MIN: ${RATE_LIMIT_USER_PER_MIN:-60}
   # Proje kökündeki .env ya da kabuk ortamıyla değiştirilebilir; boşsa koddaki varsayılan
   # geçerli (api/src/config/configuration.ts, açıklamalar api/.env.example'da).
   RIDER_SESSION_TTL_HOURS: ${RIDER_SESSION_TTL_HOURS:-}
+  ADMIN_SESSION_TTL_HOURS: ${ADMIN_SESSION_TTL_HOURS:-}
   LOGIN_MAX_ATTEMPTS: ${LOGIN_MAX_ATTEMPTS:-}
   SIGNAL_LOSS_TIMEOUT_MS: ${SIGNAL_LOSS_TIMEOUT_MS:-}
   SIGNAL_LOSS_SWEEP_MS: ${SIGNAL_LOSS_SWEEP_MS:-}
   RENTAL_IDLE_TIMEOUT_MS: ${RENTAL_IDLE_TIMEOUT_MS:-}
   DEVICE_LOG_SIZE: ${DEVICE_LOG_SIZE:-}
   DEVICE_LOG_TTL_HOURS: ${DEVICE_LOG_TTL_HOURS:-}
+  # Dağıtık izleme (OpenTelemetry): adres verilince açılır, ör. observability profiliyle
+  # OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318. Örnekleme oranı 0–1 (yükte 0.05 gibi).
+  OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+  OTEL_TRACES_SAMPLER: parentbased_traceidratio
+  OTEL_TRACES_SAMPLER_ARG: ${OTEL_TRACES_SAMPLER_ARG:-1}
 
 services:
   postgres:
     # Resmi postgis/postgis imajı sadece amd64; bu imaj arm64'ü de destekliyor.
     image: imresamu/postgis:17-3.5
+    restart: unless-stopped
     environment:
       POSTGRES_USER: geofence
       POSTGRES_PASSWORD: geofence
@@ -64,6 +72,7 @@ services:
 
   redis:
     image: redis:8-alpine
+    restart: unless-stopped
     # Kuyruk diske yazılır (AOF, saniyede bir): Redis yeniden başlarsa bekleyen konumlar kaybolmaz.
     command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec", "--maxmemory-policy", "noeviction"]
     volumes:
@@ -85,18 +94,34 @@ services:
       DB_PASSWORD: geofence
       DB_APP_USER: geofence_app
       DB_APP_PASSWORD: ${DB_APP_PASSWORD:-geofence_app}
+      # Operasyon paneline giriş: yoksa oluşturulur, varsa şifresine dokunulmaz. Demo şifresi
+      # production'da reddedilir; gerçek ortamda secret olarak verilmeli.
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin-demo-sifresi}
     depends_on:
       postgres:
         condition: service_healthy
 
   api:
     build: ./api
-    command: ["node", "dist/main.js"]
+    # tracing.js izleme kapalıysa (OTEL_EXPORTER_OTLP_ENDPOINT boş) hiçbir şey yüklemez.
+    command: ["node", "--import", "./dist/tracing.js", "dist/main.js"]
+    # Süreç çökerse (ör. bellek) Docker yeniden başlatır. Kubernetes'te: liveness
+    # /health/live, readiness /health/ready (README, "Sağlık kontrolleri").
+    restart: unless-stopped
     environment:
       <<: *api-env
       PORT: 3000
+      OTEL_SERVICE_NAME: location-api
     ports:
       - "${API_PORT:-3000}:3000"
+    # Hazır olunca (veritabanı ve Redis erişilebilir) arayüzler açılır.
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/health/ready"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+      start_period: 20s
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -105,8 +130,18 @@ services:
 
   worker:
     build: ./api
-    command: ["node", "dist/worker.js"]
-    environment: *api-env
+    command: ["node", "--import", "./dist/tracing.js", "dist/worker.js"]
+    restart: unless-stopped
+    environment:
+      <<: *api-env
+      OTEL_SERVICE_NAME: location-worker
+    # Worker'ın HTTP API'si yok; metrik portu sağlık kontrolünü de yayınlar.
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:9100/health/ready"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+      start_period: 20s
     deploy:
       replicas: 2
     depends_on:
@@ -115,21 +150,35 @@ services:
       redis:
         condition: service_healthy
 
+  # Giriş kayıtlarının saklama işi: çıkışı LOG_RETENTION_DAYS'ten eski kayıtları saatte bir
+  # siler. Uygulama rolü kayıt silemez (denetim izi); iş şema sahibiyle bağlanır. Kubernetes'te
+  # --loop olmadan CronJob olarak çalışır.
+  log-retention:
+    build: ./api
+    command: ["node", "dist/database/log-retention.js", "--loop"]
+    restart: unless-stopped
+    environment:
+      <<: *api-env
+      DB_USER: geofence
+      DB_PASSWORD: geofence
+      LOG_RETENTION_DAYS: ${LOG_RETENTION_DAYS:-}
+      LOG_RETENTION_INTERVAL_MS: ${LOG_RETENTION_INTERVAL_MS:-}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
   # Operasyon: canlı harita, giriş kayıtları, alan yönetimi
   ops:
     build:
       context: ./clients
       args:
         APP: ops
-    environment:
-      # nginx API isteklerine ekler: anahtar tarayıcı kodunda görünmez, ama bu adrese
-      # erişebilen herkes onun yetkisini kullanır. Operasyon uygulaması iç ağda/VPN ya da
-      # SSO arkasında yayınlanmalı.
-      API_KEY: ${API_KEY:-dev-api-key}
+    restart: unless-stopped
     ports:
       - "${OPS_PORT:-8080}:80"
     depends_on:
-      - api
+      api:
+        condition: service_healthy
 
   # Sürücü: konumu 5 saniyede bir gönderen cihaz uygulaması
   driver:
@@ -137,14 +186,12 @@ services:
       context: ./clients
       args:
         APP: driver
-    environment:
-      # Herkese açık uygulama: anahtar eklenmez (nginx boş başlığı iletmez). Sürücü kendi
-      # hesabıyla giriş yapar; oturum token'ı tarayıcıdan Authorization başlığıyla gider.
-      API_KEY: ""
+    restart: unless-stopped
     ports:
       - "${DRIVER_PORT:-8081}:80"
     depends_on:
-      - api
+      api:
+        condition: service_healthy
 
   k6:
     # Sürüm sabit: k6 sürümü değişince sonuçlar ve özet biçimi değişebilir.
@@ -159,8 +206,56 @@ services:
     entrypoint: ["k6"]
     command: ["run", "/scripts/locations.k6.js"]
     depends_on:
-      - api
+      api:
+        condition: service_healthy
+
+  # Gözlemlenebilirlik: docker compose --profile observability up -d
+  # Prometheus :9090 (alarm kuralları), Alertmanager :9093, Grafana :3001, Jaeger :16686.
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    profiles: ["observability"]
+    restart: unless-stopped
+    volumes:
+      - ./docker/observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./docker/observability/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheusdata:/prometheus
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+
+  alertmanager:
+    image: prom/alertmanager:v0.28.1
+    profiles: ["observability"]
+    restart: unless-stopped
+    volumes:
+      - ./docker/observability/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    ports:
+      - "${ALERTMANAGER_PORT:-9093}:9093"
+
+  grafana:
+    image: grafana/grafana:12.1.0
+    profiles: ["observability"]
+    restart: unless-stopped
+    environment:
+      # Demo: panel girişsiz görüntülenir; yönetici şifresi gerçek ortamda secret olmalı.
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/konum-servisi.json
+    volumes:
+      - ./docker/observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./docker/observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "${GRAFANA_PORT:-3001}:3000"
+
+  # İzler OTLP (HTTP 4318) ile gelir; arayüz :16686. Bellekte tutulur (demo).
+  jaeger:
+    image: jaegertracing/jaeger:2.9.0
+    profiles: ["observability"]
+    restart: unless-stopped
+    ports:
+      - "${JAEGER_PORT:-16686}:16686"
 
 volumes:
   pgdata:
   redisdata:
+  prometheusdata:

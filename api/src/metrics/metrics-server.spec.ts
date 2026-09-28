@@ -39,4 +39,24 @@ describe('startMetricsServer', () => {
     expect(await res.text()).toMatch(/process_cpu_user_seconds_total/);
     expect((await fetch(`http://127.0.0.1:${port}/`)).status).toBe(404);
   });
+
+  it('/health/live her zaman 200; /health/ready kontrolün sonucuna göre 200 ya da 503', async () => {
+    const logger = { log: vi.fn(), error: vi.fn() } as unknown as Logger;
+    const probe = createServer();
+    await listening(probe);
+    const { port } = probe.address() as AddressInfo;
+    await new Promise((resolve) => probe.close(resolve));
+
+    let ready = true;
+    const server = startMetricsServer(port, logger, async () => ready);
+    onTestFinished(() => void server.close());
+    await vi.waitFor(() => expect(logger.log).toHaveBeenCalled());
+    const status = async (path: string) =>
+      (await fetch(`http://127.0.0.1:${port}${path}`)).status;
+    expect(await status('/health/live')).toBe(200);
+    expect(await status('/health/ready')).toBe(200);
+    ready = false;
+    expect(await status('/health/ready')).toBe(503);
+    expect(await status('/health/live')).toBe(200);
+  });
 });

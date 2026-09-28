@@ -1,10 +1,5 @@
-import type { Rider } from '@shared/api/types';
 import { SESSION_STORAGE_KEY as KEY } from '../config';
-
-export interface StoredSession {
-  token: string;
-  rider: Rider;
-}
+import type { StoredSession } from './account.types';
 
 /** Oturum tarayıcıda saklanır: sayfa yenilenince giriş ve sürüş kaldığı yerden devam eder. */
 export function loadSession(): StoredSession | null {

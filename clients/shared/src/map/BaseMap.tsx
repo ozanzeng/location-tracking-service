@@ -1,8 +1,7 @@
 import type { ReactNode } from 'react';
 import { MapContainer, TileLayer } from 'react-leaflet';
 import { ZoomButtons } from './ZoomButtons';
-
-export const KADIKOY: [number, number] = [40.984, 29.035];
+import { MAP_CENTER } from '../config';
 
 /**
  * OpenStreetMap altlığı; CSS ile griye çekilir (styles.css).
@@ -13,7 +12,7 @@ export const KADIKOY: [number, number] = [40.984, 29.035];
 export function BaseMap({ children }: { children?: ReactNode }) {
   return (
     <MapContainer
-      center={KADIKOY}
+      center={MAP_CENTER}
       zoom={15}
       preferCanvas
       className="map"

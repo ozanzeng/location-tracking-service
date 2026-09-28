@@ -6,7 +6,6 @@ import {
   type OnModuleDestroy,
   type OnModuleInit,
 } from '@nestjs/common';
-import { APP_CONFIG, type AppConfig } from '../config/configuration.js';
 import { RetryableHttpException } from '../common/http/retryable.exception.js';
 import {
   laneBacklogMax,
@@ -15,6 +14,8 @@ import {
 } from '../metrics/metrics.js';
 import { RejectionReason } from '../metrics/rejection-reason.enum.js';
 import { LocationLanes } from '../queue/location-lanes.js';
+import type { AppConfig } from '../config/configuration.types.js';
+import { APP_CONFIG } from '../config/config.constants.js';
 
 /**
  * Worker'lar uzun süre yetişemezse kuyruk sınırsız büyüyüp Redis belleğini doldurur.

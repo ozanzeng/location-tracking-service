@@ -5,27 +5,9 @@ import {
   createRedis,
   throttledErrorLogger,
 } from '../common/redis/create-redis.js';
-import { APP_CONFIG, type AppConfig } from '../config/configuration.js';
-import type { AreaEventType } from '../geofence/area-event-type.enum.js';
-import type { AreaRef } from '../geofence/geofence.types.js';
-import { DeviceLogResult } from './device-log-result.enum.js';
-
-/** Cihaz günlüğünün bir satırı: sunucunun bir konumla ne yaptığı. */
-export interface DeviceLogEntry {
-  /** API'nin konumu kabul edip kuyruğa aldığı an. */
-  receivedAt: string;
-  /** Worker'ın konumu işlediği an. */
-  processedAt: string;
-  /** Konumun cihazda ölçüldüğü an (gönderilen timestamp). */
-  recordedAt: string;
-  lat: number;
-  lng: number;
-  result: DeviceLogResult;
-  /** Bu konumla girilen ya da çıkılan alanlar. */
-  events: Array<{ type: AreaEventType; area: AreaRef }>;
-  /** İsteğin kimliği; API ve worker loglarında aynı istek bununla bulunur. */
-  requestId?: string;
-}
+import type { DeviceLogEntry } from './fleet.types.js';
+import type { AppConfig } from '../config/configuration.types.js';
+import { APP_CONFIG } from '../config/config.constants.js';
 
 /**
  * Sunucu tarafı cihaz günlüğü: scooter başına son işlenen konumlar, Redis'te sınırlı bir liste

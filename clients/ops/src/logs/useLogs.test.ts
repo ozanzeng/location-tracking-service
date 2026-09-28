@@ -2,7 +2,8 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 import type { LogEntry, LogQuery } from '@shared/api/types';
-import { EMPTY_FILTERS, type LogFilters } from './logFilters';
+import type { LogFilters } from './logs.types';
+import { EMPTY_FILTERS } from './logs.constants';
 
 type Page = { data: LogEntry[]; nextCursor: string | null };
 const pending: Array<{ query: LogQuery; resolve: (p: Page) => void }> = [];

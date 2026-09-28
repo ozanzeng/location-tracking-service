@@ -1,5 +1,7 @@
-// İstemci smoke testi: sürücü ve operasyon uygulamaları ayakta mı, HİÇBİR VERİ YAZMADAN kontrol eder.
-// Kullanım: npm run smoke   (DRIVER_URL, OPS_URL; varsayılan :8081 ve :8080)
+// İstemci smoke testi: sürücü ve operasyon uygulamaları ayakta mı, veri yazmadan kontrol eder
+// (tek iz: yönetici girişi son giriş anını yazar; oturum sonda kapatılır).
+// Kullanım: npm run smoke   (DRIVER_URL, OPS_URL; varsayılan :8081 ve :8080;
+// ADMIN_USERNAME, ADMIN_PASSWORD; varsayılan docker-compose'daki demo yönetici)
 // Tarayıcı adımları yüklü Google Chrome'u kullanır (PW_CHANNEL ile değiştirilebilir).
 // Herhangi bir adım başarısız olursa 1 koduyla çıkar.
 
@@ -7,6 +9,10 @@ import { chromium } from 'playwright-core';
 
 const DRIVER_URL = (process.env.DRIVER_URL ?? 'http://localhost:8081').replace(/\/$/, '');
 const OPS_URL = (process.env.OPS_URL ?? 'http://localhost:8080').replace(/\/$/, '');
+const ADMIN = {
+  username: process.env.ADMIN_USERNAME ?? 'admin',
+  password: process.env.ADMIN_PASSWORD ?? 'admin-demo-sifresi',
+};
 let failures = 0;
 
 async function step(name, fn) {
@@ -52,15 +58,32 @@ await step('yol haritası sıkıştırılmış geliyor', async () => {
   return `${data.nodes.length / 2} düğüm`;
 });
 
-await step("operasyon: nginx API'ye anahtarı ekliyor", async () => {
+await step('operasyon: anahtar eklenmez, veri yönetici girişiyle okunur', async () => {
   const health = await get(`${OPS_URL}/api/health`);
   expect(health.ok, `/api/health → ${health.status}`);
-  // /areas anahtar ister; tarayıcı anahtar göndermez, nginx eklemeli.
-  const areas = await get(`${OPS_URL}/api/areas`);
-  expect(areas.ok, `/api/areas → ${areas.status} (nginx anahtarı eklemiyor olabilir)`);
-  const scooters = await get(`${OPS_URL}/api/scooters`);
-  expect(scooters.ok, `/api/scooters → ${scooters.status}`);
-  return `${(await areas.json()).length} alan, ${(await scooters.json()).length} scooter`;
+  // nginx anahtar eklemez: girişsiz istek reddedilir.
+  const anonymous = await get(`${OPS_URL}/api/logs?limit=1`);
+  expect(
+    anonymous.status === 401,
+    `girişsiz /api/logs → ${anonymous.status} (401 bekleniyordu; nginx anahtar ekliyor olabilir)`,
+  );
+  const login = await fetch(`${OPS_URL}/api/auth/admin/login`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(ADMIN),
+    signal: AbortSignal.timeout(5000),
+  });
+  expect(login.ok, `yönetici girişi → ${login.status} (ADMIN_USERNAME / ADMIN_PASSWORD)`);
+  const auth = { authorization: `Bearer ${(await login.json()).token}` };
+  try {
+    const areas = await get(`${OPS_URL}/api/areas`, auth);
+    expect(areas.ok, `/api/areas → ${areas.status}`);
+    const scooters = await get(`${OPS_URL}/api/scooters`, auth);
+    expect(scooters.ok, `/api/scooters → ${scooters.status}`);
+    return `${(await areas.json()).length} alan, ${(await scooters.json()).length} scooter`;
+  } finally {
+    await fetch(`${OPS_URL}/api/auth/admin/logout`, { method: 'POST', headers: auth }).catch(() => undefined);
+  }
 });
 
 await step('sürücü: anahtar yok, giriş yapmadan hiçbir veri okunamaz', async () => {
@@ -100,9 +123,12 @@ if (browser) {
     await page.close();
   });
 
-  await step('operasyon: canlı bağlantı, sistem durumu ve kayıtlar', async () => {
+  await step('operasyon: giriş, canlı bağlantı, sistem durumu ve kayıtlar', async () => {
     const { page, errors } = await openPage();
     await page.goto(`${OPS_URL}/#/live`);
+    await page.getByLabel('Kullanıcı adı').fill(ADMIN.username);
+    await page.getByLabel('Şifre').fill(ADMIN.password);
+    await page.getByRole('button', { name: 'Giriş yap' }).click();
     await page.getByText('Canlı bağlantı açık').waitFor({ timeout: 8000 });
     await page.getByText(/Servis çalışıyor/).waitFor({ timeout: 8000 });
     await page.goto(`${OPS_URL}/#/logs`);
@@ -110,6 +136,8 @@ if (browser) {
     await page.goto(`${OPS_URL}/#/scooters`);
     await page.getByRole('heading', { name: 'Scooterlar' }).waitFor({ timeout: 5000 });
     await page.getByText('scooter-01').first().waitFor({ timeout: 5000 });
+    await page.getByRole('button', { name: 'Çıkış yap' }).click();
+    await page.getByRole('heading', { name: 'Yönetici girişi' }).waitFor({ timeout: 5000 });
     expect(errors.length === 0, `konsol hatası: ${errors[0]}`);
     await page.close();
   });

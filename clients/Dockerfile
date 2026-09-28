@@ -11,6 +11,6 @@ RUN npm run build -w ${APP}
 
 FROM nginx:1.29-alpine
 ARG APP
-# /etc/nginx/templates altındaki dosyalar açılışta envsubst ile işlenir (API_KEY).
+# /etc/nginx/templates altındaki dosyalar açılışta envsubst ile işlenir.
 COPY nginx/default.conf.template /etc/nginx/templates/default.conf.template
 COPY --from=build /app/${APP}/dist /usr/share/nginx/html

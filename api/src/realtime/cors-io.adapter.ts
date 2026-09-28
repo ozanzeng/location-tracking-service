@@ -1,12 +1,6 @@
 import type { INestApplicationContext } from '@nestjs/common';
 import { IoAdapter } from '@nestjs/platform-socket.io';
-
-export interface HeartbeatOptions {
-  /** Sunucunun ping gönderme aralığı (ms). */
-  pingInterval: number;
-  /** Ping'e bu süre içinde cevap vermeyen bağlantı kapatılır (ms). */
-  pingTimeout: number;
-}
+import type { HeartbeatOptions } from './realtime.types.js';
 
 /**
  * Socket.IO sunucusuna CORS ve ping ayarlarını config'ten verir. Gateway dekoratöründe

@@ -1,24 +1,27 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import type { Job } from 'bullmq';
-import { APP_CONFIG, type AppConfig } from '../config/configuration.js';
 import {
   areaTransitions,
   jobDuration,
   jobFailures,
   jobLag,
 } from '../metrics/metrics.js';
+import { DeviceLog } from '../fleet/device-log.js';
+import { DeviceLogResult } from '../fleet/device-log-result.enum.js';
+import { RealtimePublisher } from '../realtime/realtime.publisher.js';
+import { throttledErrorLogger } from '../common/redis/create-redis.js';
+import { withJobSpan } from '../common/tracing/trace-context.js';
+import { GeofenceService } from './geofence.service.js';
+import { ProcessStatus } from './process-status.enum.js';
+import { isTransientError } from './transient-error.js';
+import type { DeviceLogEntry } from '../fleet/fleet.types.js';
 import type {
   LocationJobData,
   LocationPoint,
   UserLocation,
-} from '../queue/location-job.js';
-import { DeviceLog, type DeviceLogEntry } from '../fleet/device-log.js';
-import { DeviceLogResult } from '../fleet/device-log-result.enum.js';
-import { RealtimePublisher } from '../realtime/realtime.publisher.js';
-import { throttledErrorLogger } from '../common/redis/create-redis.js';
-import { GeofenceService } from './geofence.service.js';
-import { ProcessStatus } from './process-status.enum.js';
-import { isTransientError } from './transient-error.js';
+} from '../queue/queue.types.js';
+import type { AppConfig } from '../config/configuration.types.js';
+import { APP_CONFIG } from '../config/config.constants.js';
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -42,10 +45,24 @@ export class LocationProcessor {
     @Inject(APP_CONFIG) private readonly config: AppConfig,
   ) {}
 
-  async process(job: Job<LocationJobData | UserLocation>) {
+  process(job: Job<LocationJobData | UserLocation>) {
     // Kuyrukta bekleme süresi: worker'ların yetişip yetişmediğinin en doğrudan göstergesi.
     jobLag.observe((Date.now() - job.timestamp) / 1000);
+    const data = job.data;
+    return withJobSpan(
+      'location.process',
+      'trace' in data ? data.trace : undefined,
+      {
+        'scooter.id': data.userId,
+        'location.points': jobPoints(data).length,
+        'messaging.system': 'bullmq',
+        'messaging.destination.name': job.queueName,
+      },
+      () => this.processJob(job),
+    );
+  }
 
+  private async processJob(job: Job<LocationJobData | UserLocation>) {
     const { userId } = job.data;
     const points = jobPoints(job.data);
     let processed = 0;

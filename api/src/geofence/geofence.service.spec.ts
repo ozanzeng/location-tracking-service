@@ -1,12 +1,9 @@
 import type { DataSource, EntityManager } from 'typeorm';
 import { AreaType } from '../areas/area-type.enum.js';
 import { AreaEventType } from './area-event-type.enum.js';
-import type {
-  GeofenceRepository,
-  GeofenceState,
-  Transition,
-} from './geofence.repository.js';
+import type { GeofenceRepository } from './geofence.repository.js';
 import { GeofenceService } from './geofence.service.js';
+import type { GeofenceState, Transition } from './geofence.types.js';
 
 const MODA = { id: 'moda', name: 'Moda', type: AreaType.NO_RIDE };
 const PARK = { id: 'park', name: 'Park', type: AreaType.PARKING };

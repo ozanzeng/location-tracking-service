@@ -1,9 +1,6 @@
-export interface LatLng {
-  lat: number;
-  lng: number;
-}
+import type { LatLng } from './geo.types';
+import { M_PER_DEG_LAT } from './geo.constants';
 
-export const M_PER_DEG_LAT = 110_540;
 export const mPerDegLng = (lat: number) => 111_320 * Math.cos((lat * Math.PI) / 180);
 
 /** İki nokta arası mesafe (m). Şehir ölçeğinde yeterince doğru, hızlı düzlem yaklaşımı. */

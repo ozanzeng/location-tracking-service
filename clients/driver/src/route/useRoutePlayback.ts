@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { PLAYBACK_TICK_MS } from '../config';
-import { pointAlong, type LatLng } from '../geo/latlng';
+import { pointAlong } from '../geo/latlng';
+import type { LatLng } from '../geo/geo.types';
 
 /**
  * Rotayı oynatır: konum çizgi boyunca seçilen hızla ilerler. Konumu göndermek GPS

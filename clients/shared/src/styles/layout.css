@@ -350,3 +350,50 @@ main {
     font-size: var(--step-2);
   }
 }
+
+/* Giriş ekranları (sürücü, yönetici) ve scooter seçimi: haritasız, ortalanmış kart; üst çubukta hesap */
+
+.gate {
+  display: grid;
+  place-items: start center;
+  height: 100%;
+  padding: 2.5rem 1rem;
+  overflow-y: auto;
+}
+
+.gate__card {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  width: min(100%, 24rem);
+  padding: 1.75rem 1.5rem;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--paper);
+}
+
+.gate__card--wide {
+  width: min(100%, 36rem);
+}
+
+.gate__notice {
+  max-width: 36rem;
+  margin: 1.5rem auto 0;
+}
+
+.account {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.account__logout {
+  padding: 0.25rem 0.6rem;
+  border: 1px solid #6b717b;
+  border-radius: 4px;
+  background: none;
+  color: #fff;
+  font-size: var(--step--1);
+  font-weight: 700;
+  cursor: pointer;
+}

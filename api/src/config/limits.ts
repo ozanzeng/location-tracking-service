@@ -70,6 +70,9 @@ export const USERNAME_MAX_LENGTH = 32;
 export const PASSWORD_MIN_LENGTH = 8;
 export const PASSWORD_MAX_LENGTH = 128;
 
+/** Yönetici şifresinin en kısa uzunluğu: panel tüm filoyu yönetir, sürücününkinden uzun. */
+export const ADMIN_PASSWORD_MIN_LENGTH = 12;
+
 /** Başarısız giriş denemeleri bu pencerede sayılır (bkz. LOGIN_MAX_ATTEMPTS). */
 export const LOGIN_WINDOW_SECONDS = 15 * 60;
 
@@ -97,3 +100,23 @@ export const SCOOTER_REGISTRY_REFRESH_MS = 60_000;
 
 /** Sinyal kaybı taramasında bir grupta ele alınan en fazla kullanıcı. */
 export const SIGNAL_LOSS_BATCH = 500;
+
+/**
+ * Saklama işinde bir DELETE'in sildiği en fazla kayıt: kısa transaction'lar, tabloyu ve
+ * replikasyonu uzun süre meşgul etmez; autovacuum arada boşalan yeri toplar.
+ */
+export const LOG_RETENTION_BATCH = 5000;
+/** Saklama işinde gruplar arası bekleme (ms): yoğun saatte konum işlemeyle yarışmasın. */
+export const LOG_RETENTION_PAUSE_MS = 100;
+
+/** docker-compose'daki demo yönetici şifresi: production'da kabul edilmez. */
+export const DEMO_ADMIN_PASSWORD = 'admin-demo-sifresi';
+
+/** Production'da anahtarın en kısa uzunluğu: "dev-api-key" gibi tahmin edilebilir değerler geçmesin. */
+export const MIN_PRODUCTION_KEY_LENGTH = 16;
+
+/** Postgres rol adı (uygulama rolü): küçük harf, rakam ve _; en fazla 63 karakter. */
+export const DB_ROLE_NAME_PATTERN = /^[a-z_][a-z0-9_]{0,62}$/;
+
+/** Sağlık kontrolünde veritabanı ve Redis için bekleme sınırı (ms): kontrol asılı kalmasın. */
+export const HEALTH_CHECK_TIMEOUT_MS = 2000;

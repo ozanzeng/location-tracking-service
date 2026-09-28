@@ -30,3 +30,6 @@ export const HEALTH_POLL_MS = 5000;
 
 /** Scooter detay paneli açıkken yenilenme aralığı (cihaz 5 sn'de bir gönderir). */
 export const SCOOTER_DETAIL_REFRESH_MS = 5000;
+
+/** Yönetici oturumunun tarayıcıda saklandığı anahtar (sayfa yenilenince giriş kalır). */
+export const ADMIN_SESSION_STORAGE_KEY = 'ops-admin-session';

@@ -1,5 +1,6 @@
 import { ROADS_URL } from '../config';
-import { RoadNetwork, type CompactRoads } from './RoadNetwork';
+import { RoadNetwork } from './RoadNetwork';
+import type { CompactRoads } from './roads.types';
 
 let loading: Promise<RoadNetwork> | null = null;
 

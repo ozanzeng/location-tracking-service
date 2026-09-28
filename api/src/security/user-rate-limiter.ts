@@ -4,43 +4,15 @@ import {
   Injectable,
   type OnApplicationShutdown,
 } from '@nestjs/common';
-import type { Redis } from 'ioredis';
-import { APP_CONFIG, type AppConfig } from '../config/configuration.js';
 import { closeRedis, createRedis } from '../common/redis/create-redis.js';
 import { RetryableHttpException } from '../common/http/retryable.exception.js';
 import { RATE_LIMIT_WINDOW_SECONDS as WINDOW_SECONDS } from '../config/limits.js';
 import { locationsRejected } from '../metrics/metrics.js';
 import { RejectionReason } from '../metrics/rejection-reason.enum.js';
-
-/**
- * Kontrol ve artırma tek adımda (atomik): önce bütün kullanıcıların sayacı okunur, biri
- * sınıra ulaşmışsa hiçbir sayaca dokunulmadan reddedilir. Böylece reddedilen istek kotayı
- * harcamaz; ret sürekli tekrarlansa bile pencere sonunda istemci yeniden gönderebilir.
- * KEYS: kullanıcı sayaçları, ARGV: sınır, TTL, ardından her kullanıcının konum sayısı.
- * Dönen değer: sınıra ulaşmış kullanıcıların KEYS içindeki sırası (1'den başlar).
- */
-const CONSUME_SCRIPT = `
-local limit = tonumber(ARGV[1])
-local exceeded = {}
-for i, key in ipairs(KEYS) do
-  if tonumber(redis.call('GET', key) or '0') >= limit then
-    table.insert(exceeded, i)
-  end
-end
-if #exceeded > 0 then return exceeded end
-for i, key in ipairs(KEYS) do
-  redis.call('INCRBY', key, ARGV[i + 2])
-  redis.call('EXPIRE', key, ARGV[2])
-end
-return exceeded
-`;
-
-type RateLimitRedis = Redis & {
-  consumeRateLimit(
-    numKeys: number,
-    ...args: Array<string | number>
-  ): Promise<number[]>;
-};
+import type { RateLimitRedis } from './security.types.js';
+import { CONSUME_SCRIPT } from './security.constants.js';
+import type { AppConfig } from '../config/configuration.types.js';
+import { APP_CONFIG } from '../config/config.constants.js';
 
 /**
  * Kullanıcı başına dakikalık sabit pencere sayacı. Sayaç Redis'te tutulduğu için

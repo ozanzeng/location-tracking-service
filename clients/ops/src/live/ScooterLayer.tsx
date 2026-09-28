@@ -2,27 +2,15 @@ import { useEffect, type RefObject } from 'react';
 import L from 'leaflet';
 import { useMap } from 'react-leaflet';
 import { api } from '@shared/api/client';
-import type { AreaType, Position } from '@shared/api/types';
+import type { Position } from '@shared/api/types';
 import { SocketEvent } from '@shared/realtime/events';
 import { getSocket } from '@shared/realtime/socket';
 import { SCOOTER_ACTIVE_MS as ACTIVE_MS, SCOOTER_REFRESH_MS } from '../config';
 import { scooterColor } from './scooterColor';
-import { countScooters, type Counts } from './scooterCounts';
+import { countScooters } from './scooterCounts';
 import { isNewerPosition, sameCounts, silence } from './scooterState';
-
-export interface Scooter {
-  marker: L.CircleMarker;
-  types: AreaType[];
-  /** Son görülme (canlı konumda geliş anı, açılış yüklemesinde ölçüm anı). */
-  seenAt: number;
-  /** Gösterilen konumun cihazda ölçüldüğü an: eski konum yenisini ezmesin. */
-  recordedAt: number;
-  /** Soluk çizildi mi: her saniye yeniden boyanmasın. */
-  faded: boolean;
-}
-
-const LIVE_STYLE = { fillOpacity: 1, opacity: 1 };
-const FADED_STYLE = { fillOpacity: 0.35, opacity: 0.5 };
+import type { Scooter, Counts } from './live.types';
+import { LIVE_STYLE, FADED_STYLE } from './live.constants';
 
 /**
  * Scooter'ları Leaflet katmanında doğrudan günceller: yüzlerce konum saniyede birkaç kez

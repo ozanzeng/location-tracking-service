@@ -12,11 +12,12 @@ import {
 import type { Request } from 'express';
 import { RidersOnly } from '../security/access.decorator.js';
 import { CurrentRider } from '../security/current-rider.decorator.js';
-import { bearerToken, type RiderPrincipal } from '../security/principal.js';
+import { bearerToken } from '../security/principal.js';
 import { Public } from '../security/public.decorator.js';
 import { CredentialsDto } from './dto/credentials.dto.js';
 import { RiderDto, SessionResponseDto } from './dto/session-response.dto.js';
 import { RidersService } from './riders.service.js';
+import type { RiderPrincipal } from '../security/security.types.js';
 
 /** Sürücü hesabı: üyelik, giriş, çıkış. */
 @ApiTags('auth')

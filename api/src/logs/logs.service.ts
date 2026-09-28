@@ -1,23 +1,11 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
-import type { AreaType } from '../areas/area-type.enum.js';
 import { decodeCursor, encodeCursor } from './cursor.js';
-import { ExitReason, type StoredExitReason } from './exit-reason.enum.js';
+import { ExitReason } from './exit-reason.enum.js';
 import type { ListLogsQueryDto } from './dto/list-logs-query.dto.js';
 import type { LogPageDto } from './dto/log-response.dto.js';
-
-interface LogRow {
-  id: string;
-  user_id: string;
-  area_id: string;
-  area_name: string;
-  area_type: AreaType;
-  entry_time: Date;
-  exit_time: Date | null;
-  exit_reason: StoredExitReason | null;
-  last_seen_at: Date | null;
-}
+import type { LogRow } from './logs.types.js';
 
 @Injectable()
 export class LogsService {

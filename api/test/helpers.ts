@@ -3,17 +3,15 @@ import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { DataSource } from 'typeorm';
 import { AppModule } from '../src/app.module.js';
-import {
-  APP_CONFIG,
-  type AppConfig,
-  loadConfig,
-} from '../src/config/configuration.js';
+import { loadConfig } from '../src/config/configuration.js';
 import { ScooterRegistry } from '../src/fleet/scooter-registry.js';
 import { DEFAULT_SCOOTERS } from '../src/database/migrations/1727500000000-FleetAndRiders.js';
 import type { ExitReason } from '../src/logs/exit-reason.enum.js';
 import { LocationLanes } from '../src/queue/location-lanes.js';
 import { setupApp } from '../src/setup-app.js';
 import { WorkerModule } from '../src/worker.module.js';
+import type { AppConfig } from '../src/config/configuration.types.js';
+import { APP_CONFIG } from '../src/config/config.constants.js';
 
 interface TestAppOptions {
   /** Varsayılan config'in üzerine yazılacak değerler. */

@@ -8,13 +8,11 @@ import type { ScooterRegistry } from '../fleet/scooter-registry.js';
 import type { Mock } from 'vitest';
 import type { LocationLanes } from '../queue/location-lanes.js';
 import { PrincipalKind } from '../security/principal-kind.enum.js';
-import {
-  type RiderPrincipal,
-  SERVICE_PRINCIPAL,
-} from '../security/principal.js';
 import type { UserRateLimiter } from '../security/user-rate-limiter.js';
 import { LocationsService } from './locations.service.js';
 import type { QueueBackpressure } from './queue-backpressure.js';
+import type { RiderPrincipal } from '../security/security.types.js';
+import { SERVICE_PRINCIPAL } from '../security/security.constants.js';
 
 describe('LocationsService', () => {
   const now = new Date('2026-09-25T10:00:00.000Z');

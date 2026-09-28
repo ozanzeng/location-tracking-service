@@ -1,5 +1,5 @@
 import { memo } from 'react';
-import type { DeviceLogEntry } from './useOutbox';
+import type { DeviceLogEntry } from './device.types';
 
 const timeFmt = new Intl.DateTimeFormat('tr-TR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 

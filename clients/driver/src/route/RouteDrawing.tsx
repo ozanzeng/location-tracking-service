@@ -2,8 +2,9 @@ import { useEffect, useRef, useState } from 'react';
 import type L from 'leaflet';
 import { CircleMarker, useMapEvents } from 'react-leaflet';
 import { SAME_STOP_METERS, SNAP_METERS, STOP_HIT_PX } from '../config';
-import type { LatLng } from '../geo/latlng';
-import type { Restrictions, RoadNetwork, Snap } from '../roads/RoadNetwork';
+import type { RoadNetwork } from '../roads/RoadNetwork';
+import type { LatLng } from '../geo/geo.types';
+import type { Restrictions, Snap } from '../roads/roads.types';
 
 interface Props {
   roads: RoadNetwork;

@@ -6,10 +6,10 @@ export const OPS_URL = process.env.OPS_URL ?? 'http://localhost:8080';
 
 const run = Date.now().toString(36);
 
-async function call(url, body, expected) {
+async function call(url, body, expected, headers = {}) {
   const res = await fetch(url, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', ...headers },
     body: JSON.stringify(body),
   });
   if (!expected.includes(res.status)) {
@@ -18,11 +18,47 @@ async function call(url, body, expected) {
   return res;
 }
 
-/** Filoya test scooter'ı ekler (operasyon uygulamasının nginx'i anahtarı ekler). */
+/** Operasyon paneli yöneticisi (varsayılan: docker-compose'daki demo yönetici). */
+const ADMIN = {
+  username: process.env.ADMIN_USERNAME ?? 'admin',
+  password: process.env.ADMIN_PASSWORD ?? 'admin-demo-sifresi',
+};
+/** Operasyon panelinin localStorage'daki oturum anahtarı (ops/src/config.ts). */
+const ADMIN_SESSION_KEY = 'ops-admin-session';
+let adminSession;
+
+/** Yönetici oturumu (koşu başına bir kez açılır). */
+async function getAdminSession() {
+  if (!adminSession) {
+    const res = await call(`${OPS_URL}/api/auth/admin/login`, ADMIN, [200]);
+    const { token, admin } = await res.json();
+    adminSession = { token, admin };
+  }
+  return adminSession;
+}
+
+/** Operasyon API'sine doğrudan istek için başlık. */
+export async function adminHeaders() {
+  return { authorization: `Bearer ${(await getAdminSession()).token}` };
+}
+
+/**
+ * Operasyon sayfaları yönetici oturumuyla açılır: oturum sayfa yüklenmeden localStorage'a
+ * yazılır. Giriş formunun kendisi smoke testinde sınanır.
+ */
+export async function signInOps(pageOrContext) {
+  const session = await getAdminSession();
+  await pageOrContext.addInitScript(
+    ([key, value]) => localStorage.setItem(key, value),
+    [ADMIN_SESSION_KEY, JSON.stringify(session)],
+  );
+}
+
+/** Filoya test scooter'ı ekler (yönetici oturumuyla). */
 export async function registerScooter(name) {
   const id = `ui-${name}-${run}`;
   // 409: aynı koşuda daha önce eklendi.
-  await call(`${OPS_URL}/api/scooters`, { id, name: `UI testi ${name}` }, [201, 409]);
+  await call(`${OPS_URL}/api/scooters`, { id, name: `UI testi ${name}` }, [201, 409], await adminHeaders());
   return id;
 }
 

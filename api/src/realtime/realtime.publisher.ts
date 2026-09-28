@@ -5,15 +5,15 @@ import {
   type OnApplicationShutdown,
 } from '@nestjs/common';
 import type { Redis } from 'ioredis';
-import { APP_CONFIG, type AppConfig } from '../config/configuration.js';
 import { closeRedis, createRedis } from '../common/redis/create-redis.js';
 import type { AreaEvent } from '../geofence/geofence.types.js';
-import {
-  areasChannel,
-  updatesChannel,
-  type AreasChangedMessage,
-  type GeofenceUpdateMessage,
-} from './realtime.constants.js';
+import type {
+  AreasChangedMessage,
+  GeofenceUpdateMessage,
+} from './realtime.types.js';
+import { areasChannel, updatesChannel } from './channels.js';
+import type { AppConfig } from '../config/configuration.types.js';
+import { APP_CONFIG } from '../config/config.constants.js';
 
 @Injectable()
 export class RealtimePublisher implements OnApplicationShutdown {

@@ -1,13 +1,6 @@
-import type { AreaType, EventType } from '@shared/api/types';
 import { riderMessage } from './riderMessages';
 import { SignIcon } from '@shared/zones/SignIcon';
-
-export interface PlateItem {
-  key: string;
-  type: AreaType;
-  eventType: EventType;
-  areaName: string;
-}
+import type { PlateItem } from './rider.types';
 
 /** Sürücü bildirimi: bölge tipine göre renklenen levha. */
 export function SignPlate({ item, onClose }: { item: PlateItem; onClose: () => void }) {

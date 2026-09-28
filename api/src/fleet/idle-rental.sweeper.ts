@@ -7,13 +7,14 @@ import {
 } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
-import { APP_CONFIG, type AppConfig } from '../config/configuration.js';
 import { idleRentalsEnded } from '../metrics/metrics.js';
 import { LocationLanes } from '../queue/location-lanes.js';
 import { FleetChange } from './fleet-change.enum.js';
 import { FleetEvents } from './fleet-events.js';
 import { RentalCache } from './rental-cache.js';
 import { RentalEndReason } from './rental-end-reason.enum.js';
+import type { AppConfig } from '../config/configuration.types.js';
+import { APP_CONFIG } from '../config/config.constants.js';
 
 /**
  * Unutulan kiralama: RENTAL_IDLE_TIMEOUT_MS (varsayılan 10 dk) boyunca scooter'dan konum

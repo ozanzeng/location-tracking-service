@@ -8,25 +8,7 @@ import {
   OUTBOX_MAX_BATCH as MAX_BATCH,
   OUTBOX_MAX_QUEUE as MAX_QUEUE,
 } from '../config';
-
-/** Cihaz günlüğü satırının türü (CSS'te device-log__item--<tür>). */
-export const LogKind = { SENT: 'sent', QUEUED: 'queued', WAIT: 'wait', ERROR: 'error' } as const;
-export type LogKind = (typeof LogKind)[keyof typeof LogKind];
-
-export interface DeviceLogEntry {
-  id: number;
-  at: Date;
-  kind: LogKind;
-  text: string;
-  requestId?: string | null;
-}
-
-export interface OutboxHandlers {
-  /** 401: sürücü oturumu düştü (süresi doldu ya da çıkış yapıldı). */
-  onUnauthorized?: () => void;
-  /** 403/409: konum kiralama yüzünden reddedildi; kiralama hâlâ bu sürücüde mi bakılmalı. */
-  onRentalRejected?: () => void;
-}
+import { LogKind, type DeviceLogEntry, type OutboxHandlers } from './device.types';
 
 /**
  * Cihazın gönderim kuyruğu. Konumlar önce sıraya girer, ardından gönderilir:

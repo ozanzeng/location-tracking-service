@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { describe, test } from 'vitest';
-import { pathLength, type LatLng } from '../geo/latlng';
-import { distanceToZone, pointInZone, type Zone } from '../geo/zone';
-import { RoadNetwork, type CompactRoads } from './RoadNetwork';
+import { pathLength } from '../geo/latlng';
+import { distanceToZone, pointInZone } from '../geo/zone';
+import { RoadNetwork } from './RoadNetwork';
+import type { LatLng, Zone } from '../geo/geo.types';
+import type { CompactRoads } from './roads.types';
 
 // Yaklaşık 220 m'lik kare blok; A-B-C-D yolları var, D-A yolu yok (bloğun bir yanı açık).
 //   B ───── C

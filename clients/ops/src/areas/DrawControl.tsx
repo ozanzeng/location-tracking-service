@@ -2,12 +2,7 @@ import { useEffect, useState } from 'react';
 import L from 'leaflet';
 import type { Polygon as GeoPolygon } from 'geojson';
 import { useMap } from 'react-leaflet';
-
-/** Haritada çizilmiş, henüz kaydedilmemiş alan. */
-export interface Draft {
-  layer: L.Layer;
-  geometry: GeoPolygon;
-}
+import type { Draft } from './areas.types';
 
 /**
  * Çizim aracı (leaflet-geoman) sadece bu ekranda gerekli; ana pakete girmesin diye

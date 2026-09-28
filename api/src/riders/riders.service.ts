@@ -6,7 +6,8 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { QueryFailedError, Repository } from 'typeorm';
-import { RiderSessions } from '../security/rider-sessions.js';
+import { PrincipalKind } from '../security/principal-kind.enum.js';
+import { Sessions } from '../security/sessions.js';
 import type { CredentialsDto } from './dto/credentials.dto.js';
 import type { SessionResponseDto } from './dto/session-response.dto.js';
 import { LoginThrottle } from './login-throttle.js';
@@ -22,7 +23,7 @@ import { Rider } from './rider.entity.js';
 export class RidersService {
   constructor(
     @InjectRepository(Rider) private readonly riders: Repository<Rider>,
-    private readonly sessions: RiderSessions,
+    private readonly sessions: Sessions,
     private readonly throttle: LoginThrottle,
   ) {}
 
@@ -83,8 +84,12 @@ export class RidersService {
 
   private async openSession(rider: Rider): Promise<SessionResponseDto> {
     return {
-      token: await this.sessions.create(rider.id, rider.username),
-      expiresIn: this.sessions.ttl,
+      token: await this.sessions.create({
+        kind: PrincipalKind.RIDER,
+        riderId: rider.id,
+        username: rider.username,
+      }),
+      expiresIn: this.sessions.ttl(PrincipalKind.RIDER),
       rider: { id: rider.id, username: rider.username },
     };
   }

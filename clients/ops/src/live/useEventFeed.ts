@@ -4,7 +4,8 @@ import type { AreaEvent } from '@shared/api/types';
 import { SocketEvent } from '@shared/realtime/events';
 import { getSocket } from '@shared/realtime/socket';
 import { FEED_HISTORY_SIZE as HISTORY_SIZE, FEED_LIMIT } from '../config';
-import { logsToFeed, mergeFeed, type FeedItem } from './logsToFeed';
+import { logsToFeed, mergeFeed } from './logsToFeed';
+import type { FeedItem } from './live.types';
 
 /** Giriş/çıkış akışı: açılışta son kayıtlar, ardından canlı olaylar. */
 export function useEventFeed() {
