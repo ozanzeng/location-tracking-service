@@ -1,5 +1,6 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useAreas } from '@shared/hooks/useAreas';
+import { LOGS_CLOCK_MS } from '../config';
 import { EMPTY_FILTERS, isEmpty, type LogFilters } from './logFilters';
 import { LogFiltersForm } from './LogFiltersForm';
 import { LogsTable } from './LogsTable';
@@ -11,6 +12,7 @@ export function LogsView() {
   const [draft, setDraft] = useState<LogFilters>(EMPTY_FILTERS);
   const [applied, setApplied] = useState<LogFilters>(EMPTY_FILTERS);
   const logs = useLogs(applied);
+  const now = useNow(LOGS_CLOCK_MS);
   // Sabit kimlik: tablo (memo) filtre yazarken yeniden çizilmesin.
   const pickUser = useCallback((userId: string) => setDraft((d) => ({ ...d, userId })), []);
 
@@ -40,7 +42,7 @@ export function LogsView() {
       {logs.error ? <p className="error">Kayıtlar yüklenemedi: {logs.error}</p> : null}
 
       <div className="table-wrap">
-        <LogsTable rows={logs.rows} onPickUser={pickUser} />
+        <LogsTable rows={logs.rows} now={now} onPickUser={pickUser} />
         {!logs.rows.length && !logs.loading ? (
           <p className="hint logs__empty">
             {isEmpty(applied)
@@ -57,4 +59,14 @@ export function LogsView() {
       ) : null}
     </div>
   );
+}
+
+/** Belirli aralıkla değişen şimdiki zaman: "Sinyal yok · X önce" yazıları eskimesin. */
+function useNow(intervalMs: number): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), intervalMs);
+    return () => clearInterval(timer);
+  }, [intervalMs]);
+  return now;
 }

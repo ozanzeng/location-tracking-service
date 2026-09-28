@@ -14,4 +14,8 @@ export class UserLastLocation {
 
   @Column({ name: 'recorded_at', type: 'timestamptz' })
   recordedAt: Date;
+
+  /** Sunucunun bu kullanıcıdan son konumu işlediği an (sessizlik bununla ölçülür). */
+  @Column({ name: 'seen_at', type: 'timestamptz', default: () => 'now()' })
+  seenAt: Date;
 }

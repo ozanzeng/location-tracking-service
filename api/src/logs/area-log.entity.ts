@@ -34,6 +34,13 @@ export class AreaLog {
   @Column({ name: 'exit_time', type: 'timestamptz', nullable: true })
   exitTime: Date | null;
 
+  /**
+   * Çıkış, kullanıcı alandan çıktığı için değil konumu kesildiği için yazıldı (SignalLossSweeper);
+   * exitTime o zaman girişin kapatıldığı andır.
+   */
+  @Column({ name: 'signal_lost', type: 'boolean', default: false })
+  signalLost: boolean;
+
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt: Date;
 }

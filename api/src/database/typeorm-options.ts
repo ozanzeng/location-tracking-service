@@ -7,6 +7,7 @@ import { Init1727000000000 } from './migrations/1727000000000-Init.js';
 import { OpenVisitIndexAndHotUpdates1727100000000 } from './migrations/1727100000000-OpenVisitIndexAndHotUpdates.js';
 import { AreaLogsAutovacuum1727200000000 } from './migrations/1727200000000-AreaLogsAutovacuum.js';
 import { QueryStats1727300000000 } from './migrations/1727300000000-QueryStats.js';
+import { SignalLoss1727400000000 } from './migrations/1727400000000-SignalLoss.js';
 
 export const ENTITIES = [Area, AreaLog, UserLastLocation];
 export const MIGRATIONS = [
@@ -14,6 +15,7 @@ export const MIGRATIONS = [
   OpenVisitIndexAndHotUpdates1727100000000,
   AreaLogsAutovacuum1727200000000,
   QueryStats1727300000000,
+  SignalLoss1727400000000,
 ];
 
 /**

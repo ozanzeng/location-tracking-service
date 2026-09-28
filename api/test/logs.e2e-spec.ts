@@ -65,9 +65,19 @@ describe('GET /logs (e2e)', () => {
         areaType: 'NO_RIDE',
         entryTime: at(8),
         exitTime: null,
+        exitReason: null,
+        // Açık girişte servisin son konumu aldığı an (cihaz saatinden bağımsız, şimdiye yakın).
+        lastSeenAt: expect.any(String),
       }),
-      expect.objectContaining({ entryTime: at(6), exitTime: at(7) }),
+      expect.objectContaining({
+        entryTime: at(6),
+        exitTime: at(7),
+        exitReason: 'LEFT',
+        lastSeenAt: null,
+      }),
     ]);
+    const seen = Date.parse(res.body.data[0].lastSeenAt);
+    expect(Math.abs(Date.now() - seen)).toBeLessThan(60_000);
   });
 
   it('active ve zaman aralığı filtreleri', async () => {

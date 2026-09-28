@@ -60,6 +60,16 @@ describe('Şema kısıtları', () => {
     );
   });
 
+  it('"sinyal kesildi" işaretli giriş kapanmış olmalı (çıkış zamanı boş olamaz)', async () => {
+    await expectPgError(
+      ds.query(
+        `INSERT INTO area_logs (user_id, area_id, entry_time, signal_lost) VALUES ('u', $1, now(), true)`,
+        [areaId],
+      ),
+      '23514',
+    );
+  });
+
   it('aynı kullanıcının aynı alanda iki açık girişi olamaz', async () => {
     await insertVisit('u1', '2026-01-01T10:00:00Z');
     await expectPgError(insertVisit('u1', '2026-01-01T10:05:00Z'), '23505');

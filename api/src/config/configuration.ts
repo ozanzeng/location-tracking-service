@@ -67,6 +67,14 @@ export interface AppConfig {
     maxStalledCount: number;
     /** Kapanışta aktif işin bitmesi için beklenen en uzun süre (ms); sonra iş başka worker'a kalır. */
     shutdownGraceMs: number;
+    /**
+     * Bu kadar süre (ms) konumu gelmeyen kullanıcının açık girişleri "sinyal kesildi" olarak
+     * kapatılır (çıkış zamanı: kapatıldığı an); 0 kapatır. Kuyrukta bekleyen konumlar için
+     * arama ayrıca en eski bekleyen işin yaşı kadar pay bırakır.
+     */
+    signalLossTimeoutMs: number;
+    /** Sinyali kesilen kullanıcıların aranma aralığı (ms). */
+    signalLossSweepMs: number;
   };
   realtime: {
     enabled: boolean;
@@ -294,6 +302,15 @@ export function loadConfig(
       maxStalledCount: int('WORKER_MAX_STALLED_COUNT', 3, 1, 100),
       // docker stop 10 sn sonra süreci öldürür; ondan önce bitsin.
       shutdownGraceMs: int('WORKER_SHUTDOWN_GRACE_MS', 8000, 0, 600_000),
+      // Cihazlar 5 sn'de bir gönderir: 30 sn = art arda 6 konum gelmedi. Sürüş bitince
+      // uygulama konum göndermeyi bırakır; park edilen scooter da 30 sn sonra kapanır.
+      signalLossTimeoutMs: int(
+        'SIGNAL_LOSS_TIMEOUT_MS',
+        30_000,
+        0,
+        7 * 86_400_000,
+      ),
+      signalLossSweepMs: int('SIGNAL_LOSS_SWEEP_MS', 5000, 100, 3_600_000),
     },
     realtime: {
       enabled: env.REALTIME_ENABLED !== 'false',

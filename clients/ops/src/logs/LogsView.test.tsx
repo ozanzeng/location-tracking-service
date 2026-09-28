@@ -11,6 +11,8 @@ const rows: LogEntry[] = Array.from({ length: 3 }, (_, i) => ({
   areaType: 'PARKING',
   entryTime: '2026-09-28T10:00:00.000Z',
   exitTime: null,
+  exitReason: null,
+  lastSeenAt: new Date().toISOString(),
 }));
 vi.mock('@shared/api/client', () => ({
   api: { logs: () => Promise.resolve({ data: rows, nextCursor: null }) },

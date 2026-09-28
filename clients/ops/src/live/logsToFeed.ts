@@ -1,4 +1,4 @@
-import { EventType, type AreaType, type LogEntry } from '@shared/api/types';
+import { EventType, ExitReason, type AreaType, type LogEntry } from '@shared/api/types';
 
 export interface FeedItem {
   key: string;
@@ -11,7 +11,8 @@ export interface FeedItem {
 
 /**
  * Giriş kayıtlarını olay akışına çevirir: her kayıt bir giriş, çıkış zamanı varsa bir de
- * çıkış olayıdır. En yeni olay başta.
+ * çıkış olayıdır. Sinyali kesildiği için kapanan kayıt çıkış sayılmaz (kullanıcı alandan
+ * çıkmadı, konumu gelmedi). En yeni olay başta.
  */
 export function logsToFeed(logs: LogEntry[]): FeedItem[] {
   return logs
@@ -23,9 +24,10 @@ export function logsToFeed(logs: LogEntry[]): FeedItem[] {
         eventType: EventType.ENTER,
         at: l.entryTime,
       };
-      const exit: FeedItem | null = l.exitTime
-        ? { ...base, key: `${l.id}-${EventType.EXIT}`, eventType: EventType.EXIT, at: l.exitTime }
-        : null;
+      const exit: FeedItem | null =
+        l.exitTime && l.exitReason !== ExitReason.SIGNAL_LOST
+          ? { ...base, key: `${l.id}-${EventType.EXIT}`, eventType: EventType.EXIT, at: l.exitTime }
+          : null;
       return exit ? [exit, enter] : [enter];
     })
     .toSorted((a, b) => b.at.localeCompare(a.at));

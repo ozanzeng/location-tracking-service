@@ -145,6 +145,13 @@
   font-weight: 700;
 }
 
+/* Sinyal yok / sinyal kesildi: konumu gelmeyen kullanıcı, "içeride" kesin değil. */
+.badge--muted {
+  background: #eceef1;
+  color: #5b6270;
+  font-weight: 600;
+}
+
 .load-more {
   display: block;
   margin: 1rem auto 0;

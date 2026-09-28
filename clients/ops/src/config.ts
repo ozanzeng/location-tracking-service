@@ -16,6 +16,14 @@ export const FEED_HISTORY_SIZE = 40;
 
 /** Giriş kayıtları ekranında sayfa başına kayıt. */
 export const LOGS_PAGE_SIZE = 50;
+/**
+ * Açık girişin kullanıcısından bu kadar süredir konum gelmiyorsa "İçeride" yerine "Sinyal yok"
+ * gösterilir (canlı haritada soluklaştığı süreyle aynı). Sunucu 30 sn'de girişi "sinyal
+ * kesildi" olarak kapatır (SIGNAL_LOSS_TIMEOUT_MS); liste yenilenene kadar ara durum budur.
+ */
+export const LOGS_NO_SIGNAL_MS = SCOOTER_IDLE_MS;
+/** Kayıtlar ekranında "Sinyal yok · X önce" yazılarının yenilenme aralığı. */
+export const LOGS_CLOCK_MS = 10_000;
 
 /** Üst çubuktaki servis durumunun (GET /health) yenilenme aralığı. */
 export const HEALTH_POLL_MS = 5000;

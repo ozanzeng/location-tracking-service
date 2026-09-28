@@ -23,7 +23,13 @@ interface TestAppOptions {
 export async function createTestApp(
   options: TestAppOptions = {},
 ): Promise<INestApplication> {
-  const base = loadConfig();
+  const loaded = loadConfig();
+  // Sinyal kaybı araması testlerde kapalı: 30 sn'den uzun süren bir dosyada açık girişler
+  // kendiliğinden kapanmasın. Bu davranışı sınayan testler kendi süresini verir.
+  const base: AppConfig = {
+    ...loaded,
+    worker: { ...loaded.worker, signalLossTimeoutMs: 0 },
+  };
   const moduleRef = await Test.createTestingModule({
     imports:
       options.withWorker === false ? [AppModule] : [AppModule, WorkerModule],
@@ -114,6 +120,8 @@ export interface LogRow {
   areaId: string;
   entryTime: string;
   exitTime: string | null;
+  exitReason: 'LEFT' | 'SIGNAL_LOST' | null;
+  lastSeenAt: string | null;
 }
 
 /** Kullanıcının giriş kayıtları (en yeni başta). */

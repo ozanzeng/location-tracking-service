@@ -17,6 +17,10 @@ export type AreaType = (typeof AreaType)[keyof typeof AreaType];
 export const EventType = { ENTER: 'ENTER', EXIT: 'EXIT' } as const;
 export type EventType = (typeof EventType)[keyof typeof EventType];
 
+/** Girişin nasıl kapandığı: alandan çıktı ya da konumu uzun süre gelmedi (sinyal kesildi). */
+export const ExitReason = { LEFT: 'LEFT', SIGNAL_LOST: 'SIGNAL_LOST' } as const;
+export type ExitReason = (typeof ExitReason)[keyof typeof ExitReason];
+
 export const HealthStatus = { OK: 'ok', ERROR: 'error' } as const;
 export type HealthStatus = (typeof HealthStatus)[keyof typeof HealthStatus];
 
@@ -65,6 +69,10 @@ export interface LogEntry {
   areaType: AreaType;
   entryTime: string;
   exitTime: string | null;
+  /** SIGNAL_LOST: konumu 30 sn gelmedi; exitTime girişin kapatıldığı an. Açık girişte null. */
+  exitReason: ExitReason | null;
+  /** Açık girişte servisin kullanıcıdan son konumu aldığı an; kapanmış girişte null. */
+  lastSeenAt: string | null;
 }
 
 export interface LocationPoint {

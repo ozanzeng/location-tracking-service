@@ -4,6 +4,7 @@ import { DatabaseModule } from './database/database.module.js';
 import { GeofenceModule } from './geofence/geofence.module.js';
 import { LaneWorkers } from './geofence/lane-workers.js';
 import { LocationProcessor } from './geofence/location.processor.js';
+import { SignalLossSweeper } from './geofence/signal-loss.sweeper.js';
 import { QueueModule } from './queue/queue.module.js';
 import { RealtimePublisherModule } from './realtime/realtime-publisher.module.js';
 
@@ -16,6 +17,6 @@ import { RealtimePublisherModule } from './realtime/realtime-publisher.module.js
     GeofenceModule,
     RealtimePublisherModule,
   ],
-  providers: [LocationProcessor, LaneWorkers],
+  providers: [LocationProcessor, LaneWorkers, SignalLossSweeper],
 })
 export class WorkerModule {}
