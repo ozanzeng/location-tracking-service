@@ -136,6 +136,32 @@ describe('Kullanıcı şeritleri (gerçek Redis)', () => {
     release();
   });
 
+  it('iki kez takılan iş (ör. makine donması) kaybolmaz: sonraki worker işler', async () => {
+    const lane = laneOf('u4', 4);
+    await lanes.add(job('u4', 'donan'));
+
+    // İki worker sırayla işi alır ve donmuş gibi kapanır: kilit yenilenmez, iş iki kez takılır.
+    for (let k = 0; k < 2; k++) {
+      let started = false;
+      const frozen = startWorker(lane, async () => {
+        started = true;
+        await new Promise(() => {});
+      });
+      await until(() => started, 12_000);
+      await frozen.close(true);
+    }
+
+    const seen: string[] = [];
+    startWorker(lane, async (j) => {
+      seen.push(label(j));
+    });
+    await until(() => seen.length === 1, 12_000);
+    expect(seen).toEqual(['donan']);
+    // BullMQ varsayılanıyla (maxStalledCount 1) ikinci takılmada başarısız sayılırdı.
+    const counts = await lanes.queues()[lane].getJobCounts('failed');
+    expect(counts.failed).toBe(0);
+  });
+
   it('eklenen işler kullanıcının şeridine gider; toplu eklemede kimlikler sırayı korur', async () => {
     const ids = await lanes.addMany([
       job('a', 'a1'),

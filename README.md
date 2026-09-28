@@ -146,7 +146,10 @@ curl -H "$H" 'localhost:3000/logs?userId=scooter-1'
 - Şeritte aynı anda tek iş çalışır. Bu sınır BullMQ'nun kuyruk düzeyindeki global concurrency ayarıyla Redis'te uygulanır; worker süreci sayısından bağımsızdır.
 - Farklı şeritler paralel ilerler: aynı anda en fazla 64 iş işlenir, önceki 2 worker × 32 ayarıyla aynı paralellik.
 - Bedeli: yavaş bir iş aynı şeritteki diğer kullanıcıları (yaklaşık 1/64'ünü) bekletir. En dolu şeridin derinliği ayrı bir metrik olarak yayınlanır (`location_lane_backlog_max`).
-- Yeniden deneme işin içinde yapılır: nokta başına 3 deneme, aralarında 200 ve 400 ms (`WORKER_POINT_ATTEMPTS`, `WORKER_RETRY_DELAY_MS`). BullMQ'nun kendi yeniden denemesi işi şeridin sonuna atar ve sonraki iş öne geçerdi. Denemeleri tükenen iş başarısız sayılır, şerit hemen sıradaki işle devam eder.
+- Yeniden deneme işin içinde yapılır; BullMQ'nun kendi yeniden denemesi işi şeridin sonuna atar ve sonraki iş öne geçerdi. Bekleme 200 ms'den başlayıp ikiye katlanır, en fazla 5 sn olur.
+  - **Geçici altyapı hatası** (veritabanı kapalı, yeniden başlıyor, bağlantı koptu, zaman aşımı): 5 dakika boyunca denenir (`WORKER_TRANSIENT_RETRY_MS`). İş şeridinde sırasını koruyarak bekler, veritabanı dönünce kaldığı yerden devam eder.
+  - **Kalıcı hata** (veri ya da kod hatası): 3 denemeden sonra iş başarısız sayılır ve şerit sıradaki işle devam eder; tekrar denemek düzeltmez, şerit tıkanmasın (`WORKER_POINT_ATTEMPTS`).
+  - Önceden her hata ~0,6 sn sonra bırakılıyordu. Canlı ölçüm: konumlar sürekli gönderilirken Postgres 3 sn kapatıldı. API 333 konumun hepsini kabul etti ama worker'lar 48'ini işleyemeden kaybetti. Düzeltmeden sonra aynı denemede kayıp sıfır; kesinti boyunca worker başına tek satır uyarı loglandı.
 - Şerit sayısı API ve worker'da aynı olmalı. İlk açılan süreç sayıyı Redis'e yazar (`<önek>:lanes`); farklı sayıyla açılan worker açılmayı reddeder, API hatayı loglar. Değiştirmek için API durdurulur, kuyruk boşalınca bu anahtar silinir ve tüm süreçler yeni değerle açılır.
 - Şeritlerden önceki tek kuyrukta güncelleme sırasında kalmış işler de worker tarafından işlenir.
 
@@ -159,6 +162,8 @@ curl -H "$H" 'localhost:3000/logs?userId=scooter-1'
 **Açılışta Redis yoksa API yine ayağa kalkar.** `/logs`, `/areas` ve `503` dönen `/health` çalışır; canlı yayın aboneliği Redis gelince kendiliğinden kurulur.
 
 **Çöken worker'ın işi başkasına geçer.** Worker işin kilidini 10 saniyede bir yeniler. Süreç çöker ya da Redis'e ulaşamazsa kilit 20 saniye içinde düşer. Diğer worker'lar 5 saniyede bir kilidi düşmüş iş arar ve bulduğunu şeridin önüne geri koyar. Böylece şerit en fazla ~30 saniye bekler ve sıra bozulmaz: iş baştan işlenir, önceden işlenmiş noktaları "eski" sayılıp atlanır (`WORKER_LOCK_MS`, `WORKER_STALLED_CHECK_MS`). e2e testi takılan worker'ı kapatır; işin sırası bozulmadan diğer worker'da bittiğini doğrular.
+
+Bir iş başarısız sayılmadan önce 3 kez takılabilir (`WORKER_MAX_STALLED_COUNT`; BullMQ'nun varsayılanı 1). Makine bellek sıkıntısında 20 sn'den uzun donduğunda işler iki kez takılıp başarısız sayılıyor, konumlar kayboluyordu (yük testinde 60 iş). Sürekli worker'ı çökerten bir iş ise yine sonunda bırakılır. Kapanışta çalışan işin bitmesi en fazla 8 sn beklenir (`WORKER_SHUTDOWN_GRACE_MS`): veritabanı kapalıyken iş dakikalarca bekleyebileceği için beklemeden kapanılır, işin kilidi düşünce başka worker devralır.
 
 **Kuyruk dolarsa yük reddedilir (backpressure).** Worker'lar uzun süre yetişemezse kuyruk sınırsız büyüyüp Redis belleğini doldururdu. Tüm şeritlerde bekleyen iş sayısı `QUEUE_MAX_BACKLOG`'u (varsayılan 200.000) aşınca API yeni konumları `503 Retry-After: 5` ile reddeder. Kuyruk derinliği her istekte sorulmaz; saniyede bir arka planda okunur, böylece sıcak yola ek bir Redis çağrısı eklenmez.
 
@@ -275,7 +280,7 @@ docker compose up -d --build
 
 | | Birim | E2E | Smoke (veri yazmaz*) |
 |---|---|---|---|
-| **Backend** | 136 test · `api: npm test` | 66 test · `api: npm run test:e2e` | `api: npm run smoke` |
+| **Backend** | 156 test · `api: npm test` | 67 test · `api: npm run test:e2e` | `api: npm run smoke` |
 | **Veritabanı** | 28 test · `api: npm run test:db` | (backend e2e içinde) | `api: npm run smoke:db` |
 | **Frontend** | 77 test · `clients: npm run test:unit` | 18 tarayıcı testi · `clients: npm run test:ui` | `clients: npm run smoke` |
 
@@ -285,7 +290,7 @@ Statik kontroller: `api: npm run lint && npm run typecheck` (testler dahil tam t
 
 **Backend birim** (Vitest):
 - Giriş/çıkış akışı (`GeofenceService`): kilit sırası; eski konumun atlanması; commit dayanıklılığının yalnızca giriş/çıkış yokken gevşetilmesi; olayların alan bilgisiyle üretilmesi.
-- Worker'ın noktaları sırayla işlemesi; geçici hatada noktayı işin içinde yeniden denemesi (200 ve 400 ms bekleyerek), denemeler tükenince sonraki noktalara geçmemesi; eski biçimdeki (tek konumlu) işleri de işlemesi.
+- Worker'ın noktaları sırayla işlemesi; hatada noktayı işin içinde yeniden denemesi, veritabanı kapalıyken deneme sayısına takılmadan beklemesi, süre dolunca ve kalıcı hatada vazgeçmesi, beklemenin üst sınırı; hata sınıflandırması (geçici/kalıcı); kapanışta çalışan işi en fazla belirli süre beklemesi; eski biçimdeki (tek konumlu) işleri de işlemesi.
 - Kullanıcıların şeritlere kalıcı ve dengeli dağılması; worker'ın şerit sayısı uyuşmazsa hiçbir şeridi dinlemeden açılmayı reddetmesi.
 - Konum doğrulama, gruplama ve saat payı.
 - Kuyruk dolu koruması, kullanıcı başına rate limit, API anahtarı, istek kimliği, `Retry-After`; yerel geliştirmede sürücü anahtarı eksikse açılış uyarısı.
@@ -308,6 +313,7 @@ Statik kontroller: `api: npm run lint && npm run typecheck` (testler dahil tam t
 - Toplu istek sırası, sayfalama ve filtreler.
 - Kullanıcı şeritleri (gerçek Redis): iki worker aynı şeridi dinlerken işlerin üst üste binmemesi ve geliş sırası; denemeleri tükenen işin şeridi tıkamaması; çöken worker'ın işinin sırası bozulmadan diğer worker'a geçmesi; şerit sayısı uyuşmazlığı.
 - Birikmiş kuyrukta aynı kullanıcının işlerinin uçtan uca sırayla işlenmesi; şeritlerden önceki kuyrukta kalmış eski biçimdeki işler.
+- İki kez takılan (donan worker'larda kalan) işin kaybolmayıp sonraki worker'da işlenmesi.
 - Kapanış sırasında sürekli gelen isteklerin hiçbirinin `500` almaması; `500` yerine `400`: çözülemeyen zaman damgaları, geçersiz imleç, bozuk JSON; `413`: gövde sınırı; 10 bin köşeli polygon kabul, fazlası açıklamalı `400`.
 - API anahtarı ve sürücü anahtarının sınırları (HTTP ve WebSocket; sürücü bağlantısının tek kullanıcı odasında tutulması), rate limit (sınırdan büyük toplu istek, reddin kotadan düşmemesi, toplu istekte bir kullanıcı sınırdaysa diğerlerinin sayacına dokunulmaması; testler dakikalık pencerenin sonuna denk gelmesin diye pencerede en az 10 sn kalınca başlar), `503` backpressure, metrikler, canlı yayın ve alan duyurusu, ping'e cevap vermeyen bağlantının kapatılması.
 

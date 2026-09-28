@@ -58,11 +58,15 @@ describe('loadConfig doğrulama', () => {
       QUEUE_KEEP_FAILED: '300',
       WORKER_POINT_ATTEMPTS: '5',
       WORKER_RETRY_DELAY_MS: '50',
+      WORKER_TRANSIENT_RETRY_MS: '60000',
+      WORKER_MAX_STALLED_COUNT: '4',
     });
     expect(config.queue).toMatchObject({ keepCompleted: 200, keepFailed: 300 });
     expect(config.worker).toMatchObject({
       pointAttempts: 5,
       retryBaseDelayMs: 50,
+      transientRetryMs: 60_000,
+      maxStalledCount: 4,
     });
     expect(problemsFor({ WORKER_POINT_ATTEMPTS: '0' })).toEqual([
       expect.stringMatching(/WORKER_POINT_ATTEMPTS/),

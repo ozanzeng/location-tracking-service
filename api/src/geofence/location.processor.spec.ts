@@ -157,6 +157,49 @@ describe('LocationProcessor.process', () => {
     expect(geofence.process).toHaveBeenCalledTimes(2);
   });
 
+  it('veritabanı kapalıyken deneme sayısına takılmadan bekler, dönünce devam eder (konum kaybolmaz)', async () => {
+    vi.useFakeTimers();
+    const { processor, geofence, publish } = setup();
+    const down = Object.assign(new Error('connect ECONNREFUSED'), {
+      code: 'ECONNREFUSED',
+    });
+    // 8 deneme boyunca kapalı: kalıcı hata sınırı (3) çoktan aşıldı.
+    for (let i = 0; i < 8; i++) geofence.process.mockRejectedValueOnce(down);
+
+    const result = processor.process(
+      makeJob({ userId: 'u1', points: [points[0]] }),
+    );
+    await vi.runAllTimersAsync();
+    await expect(result).resolves.toMatchObject({ processed: 1 });
+    expect(geofence.process).toHaveBeenCalledTimes(9);
+    expect(publish).toHaveBeenCalledTimes(1);
+  });
+
+  it('geçici hata WORKER_TRANSIENT_RETRY_MS sürerse vazgeçer; bekleme WORKER_RETRY_MAX_DELAY_MS ile sınırlı', async () => {
+    vi.useFakeTimers();
+    const { processor, geofence } = setup({
+      retryBaseDelayMs: 100,
+      retryMaxDelayMs: 1000,
+      transientRetryMs: 10_000,
+    });
+    geofence.process.mockRejectedValue(
+      Object.assign(new Error('the database system is starting up'), {
+        code: '57P03',
+      }),
+    );
+
+    const result = processor.process(
+      makeJob({ userId: 'u1', points: [points[0]] }),
+    );
+    const failed = expect(result).rejects.toThrow('starting up');
+    await vi.runAllTimersAsync();
+    await failed;
+    // Bekleme: 100, 200, 400, 800, sonra 1000'de sabit; 10 sn'de ~15 deneme.
+    const calls = geofence.process.mock.calls.length;
+    expect(calls).toBeGreaterThanOrEqual(13);
+    expect(calls).toBeLessThanOrEqual(16);
+  });
+
   it('eski biçimdeki tek konumlu işi (points yok) de işler', async () => {
     const { processor, geofence } = setup();
     const job = makeJob({ userId: 'u1', lat: 7, lng: 8, recordedAt: 't1' });

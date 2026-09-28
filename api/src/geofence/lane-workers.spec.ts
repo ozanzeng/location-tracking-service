@@ -47,3 +47,21 @@ describe('LaneWorkers', () => {
     expect(lanes.queues).not.toHaveBeenCalled();
   });
 });
+
+describe('LaneWorkers kapanışı', () => {
+  it('çalışan iş bitmezse (ör. veritabanı kapalı) WORKER_SHUTDOWN_GRACE_MS sonra beklemeyi bırakır', async () => {
+    const base = loadConfig({});
+    const workers = new LaneWorkers(
+      lanesMock().lanes as unknown as LocationLanes,
+      {} as LocationProcessor,
+      { ...base, worker: { ...base.worker, shutdownGraceMs: 50 } },
+    );
+    // Hiç bitmeyen iş: close() dönmez.
+    (workers as unknown as { workers: object[] }).workers = [
+      { close: () => new Promise(() => {}) },
+    ];
+    const started = Date.now();
+    await workers.onModuleDestroy();
+    expect(Date.now() - started).toBeLessThan(1000);
+  });
+});

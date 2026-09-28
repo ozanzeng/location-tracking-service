@@ -32,6 +32,9 @@ export function createLaneWorker(
     concurrency: 1,
     lockDuration: config.worker.lockMs,
     stalledInterval: config.worker.stalledCheckMs,
+    // BullMQ varsayılanı 1: iki kez takılan iş (ör. makine donması) başarısız sayılıp konum
+    // kayboluyordu. Sürekli worker'ı çökerten iş yine de sonunda bırakılır.
+    maxStalledCount: config.worker.maxStalledCount,
   });
 }
 
@@ -68,8 +71,23 @@ export class LaneWorkers implements OnApplicationBootstrap, OnModuleDestroy {
     this.logger.log(`Worker hazır (${this.lanes.count} şerit)`);
   }
 
+  /**
+   * Yeni iş alınmaz, çalışan işin bitmesi en fazla WORKER_SHUTDOWN_GRACE_MS beklenir. Veritabanı
+   * kapalıyken iş dakikalarca yeniden deneyebilir; o zaman beklemeden kapanılır, işin kilidi
+   * düşünce başka bir worker onu şeridin önünden alır (konum kaybolmaz).
+   */
   async onModuleDestroy(): Promise<void> {
-    // Çalışan işler bitene kadar bekler; yeni iş alınmaz.
-    await Promise.all(this.workers.map((worker) => worker.close()));
+    const grace = new Promise<'timeout'>((resolve) =>
+      setTimeout(
+        () => resolve('timeout'),
+        this.config.worker.shutdownGraceMs,
+      ).unref(),
+    );
+    const closed = Promise.all(this.workers.map((worker) => worker.close()));
+    if ((await Promise.race([closed, grace])) === 'timeout') {
+      this.logger.warn(
+        'Çalışan iş bitmeden kapanılıyor; kilidi düşünce başka worker devralacak',
+      );
+    }
   }
 }

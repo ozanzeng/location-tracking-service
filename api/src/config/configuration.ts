@@ -43,10 +43,25 @@ export interface AppConfig {
     lockMs: number;
     /** Kilidi düşmüş işlerin aranma aralığı (ms). */
     stalledCheckMs: number;
-    /** Geçici hatada bir noktanın en fazla deneme sayısı (işin içinde). */
+    /** Kalıcı hatada (veri ya da kod hatası) bir noktanın en fazla deneme sayısı. */
     pointAttempts: number;
     /** Denemeler arası ilk bekleme (ms); her denemede ikiye katlanır. */
     retryBaseDelayMs: number;
+    /** Denemeler arası en uzun bekleme (ms). */
+    retryMaxDelayMs: number;
+    /**
+     * Geçici altyapı hatasında (veritabanı kapalı, yeniden başlıyor) nokta bu süre boyunca
+     * tekrar denenir (ms): kesinti geçince iş kaldığı yerden devam eder, konum kaybolmaz.
+     */
+    transientRetryMs: number;
+    /**
+     * İşin kaç kez "takıldı" (kilidi düştü) sayılabileceği; fazlasında iş başarısız olur.
+     * Sürekli worker'ı çökerten bir iş şeridi sonsuza dek tıkamasın, ama makine donması gibi
+     * geçici takılmalar konum kaybettirmesin.
+     */
+    maxStalledCount: number;
+    /** Kapanışta aktif işin bitmesi için beklenen en uzun süre (ms); sonra iş başka worker'a kalır. */
+    shutdownGraceMs: number;
   };
   realtime: {
     enabled: boolean;
@@ -257,6 +272,17 @@ export function loadConfig(
       stalledCheckMs: int('WORKER_STALLED_CHECK_MS', 5000, 100, 600_000),
       pointAttempts: int('WORKER_POINT_ATTEMPTS', 3, 1, 20),
       retryBaseDelayMs: int('WORKER_RETRY_DELAY_MS', 200, 0, 60_000),
+      retryMaxDelayMs: int('WORKER_RETRY_MAX_DELAY_MS', 5000, 0, 600_000),
+      // Veritabanı yük devretmesi (failover) genelde bir dakikanın altında sürer.
+      transientRetryMs: int(
+        'WORKER_TRANSIENT_RETRY_MS',
+        300_000,
+        0,
+        86_400_000,
+      ),
+      maxStalledCount: int('WORKER_MAX_STALLED_COUNT', 3, 1, 100),
+      // docker stop 10 sn sonra süreci öldürür; ondan önce bitsin.
+      shutdownGraceMs: int('WORKER_SHUTDOWN_GRACE_MS', 8000, 0, 600_000),
     },
     realtime: {
       enabled: env.REALTIME_ENABLED !== 'false',
