@@ -9,15 +9,14 @@ import type { MigrationInterface, QueryRunner } from 'typeorm';
  * tetiklenen temizlik (insert) görünürlük haritasını güncel tutar; kayıt sorguları
  * (index-only scan) yığına daha az gider.
  *
- * ALTER TABLE ... SET (autovacuum_*) okuma ve yazmaları bloklamayan bir kilit alır; yine de
- * tabloda uzun süren bir VACUUM ya da index oluşturma varsa deploy beklemesin diye
- * lock_timeout konur.
+ * ALTER TABLE ... SET (autovacuum_*) okuma ve yazmaları bloklamayan bir kilit alır. Tabloda
+ * uzun süren bir VACUUM ya da index oluşturma varsa migration bağlantısının kilit sınırı
+ * (migrationOptions, DB_MIGRATION_LOCK_TIMEOUT_MS) deploy'un süresiz beklemesini önler.
  */
 export class AreaLogsAutovacuum1727200000000 implements MigrationInterface {
   name = 'AreaLogsAutovacuum1727200000000';
 
   public async up(queryRunner: QueryRunner): Promise<void> {
-    await queryRunner.query(`SET LOCAL lock_timeout = '5s'`);
     await queryRunner.query(
       `ALTER TABLE area_logs SET (
          autovacuum_vacuum_scale_factor = 0.02,
@@ -28,7 +27,6 @@ export class AreaLogsAutovacuum1727200000000 implements MigrationInterface {
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {
-    await queryRunner.query(`SET LOCAL lock_timeout = '5s'`);
     await queryRunner.query(
       `ALTER TABLE area_logs RESET (
          autovacuum_vacuum_scale_factor,

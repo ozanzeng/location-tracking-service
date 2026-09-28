@@ -1,4 +1,5 @@
 import type { DataSource } from 'typeorm';
+import { scramSha256Verifier } from './scram.js';
 
 /**
  * API ve worker'ın veritabanı yetkileri: sadece yaptıkları işler. Şema sahibi (migration'ları
@@ -20,7 +21,8 @@ const ROLE_NAME = /^[a-z_][a-z0-9_]{0,62}$/;
 /**
  * Uygulama rolünü oluşturur ya da şifresini ve yetkilerini günceller; her migrate
  * çalışmasında tekrar çağrılır, sonuç hep aynıdır. Kimlik ve şifre SQL'e sunucunun
- * format() fonksiyonuyla (%I, %L) güvenle yerleştirilir.
+ * format() fonksiyonuyla (%I, %L) güvenle yerleştirilir. Şifre sunucuya düz değil
+ * SCRAM doğrulayıcısı olarak gider: komut metni pg_stat_statements'a ve loglara düşebilir.
  */
 export async function ensureAppRole(
   ds: DataSource,
@@ -44,7 +46,7 @@ export async function ensureAppRole(
     `${exists ? 'ALTER' : 'CREATE'} ROLE %I WITH LOGIN NOSUPERUSER NOCREATEDB ` +
       'NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD %L',
     role,
-    password,
+    scramSha256Verifier(password),
   );
   const [{ db }] = await ds.query('SELECT current_database() AS db');
   await run('GRANT CONNECT ON DATABASE %I TO %I', db, role);

@@ -14,10 +14,10 @@ vi.mock('@shared/realtime/socket', () => ({
 
 const { useRiderEvents } = await import('./useRiderEvents');
 
-const event = (logId: string): AreaEvent =>
+const event = (logId: string, userId = 'scooter-1'): AreaEvent =>
   ({
     logId,
-    userId: 'scooter-1',
+    userId,
     eventType: 'ENTER',
     area: { id: 'a', name: 'Park', type: 'PARKING' },
     occurredAt: '2026-09-28T10:00:00Z',
@@ -47,5 +47,26 @@ describe('useRiderEvents', () => {
     expect(vi.getTimerCount()).toBe(2);
     unmount();
     expect(vi.getTimerCount()).toBe(0);
+  });
+
+  test("scooter değişince önceki scooter'ın levhaları ve bölgeleri ekranda kalmaz", () => {
+    const { result, rerender } = renderHook(({ id }) => useRiderEvents(id), {
+      initialProps: { id: 'scooter-1' },
+    });
+    act(() => {
+      handlers.get('area-event')?.(event('1'));
+      handlers.get('position')?.({ userId: 'scooter-1', areas: [{ id: 'a', name: 'Park', type: 'PARKING' }] });
+    });
+    expect(result.current.plates).toHaveLength(1);
+    expect(result.current.currentAreas).toHaveLength(1);
+
+    rerender({ id: 'scooter-2' });
+    expect(result.current.plates).toEqual([]);
+    expect(result.current.currentAreas).toEqual([]);
+    // Yeni scooter'ın levhası yine süresi dolunca kalkar.
+    act(() => handlers.get('area-event')?.(event('2', 'scooter-2')));
+    expect(result.current.plates).toHaveLength(1);
+    act(() => vi.advanceTimersByTime(6000));
+    expect(result.current.plates).toEqual([]);
   });
 });

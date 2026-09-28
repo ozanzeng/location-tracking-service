@@ -2,6 +2,7 @@ import type { DataSource } from 'typeorm';
 import { Area } from '../../src/areas/area.entity.js';
 import { AreaType } from '../../src/areas/area-type.enum.js';
 import { ensureAppRole } from '../../src/database/app-role.js';
+import { scramSha256Verifier } from '../../src/database/scram.js';
 import { GeofenceRepository } from '../../src/geofence/geofence.repository.js';
 import { GeofenceService } from '../../src/geofence/geofence.service.js';
 import { ProcessStatus } from '../../src/geofence/process-status.enum.js';
@@ -20,11 +21,25 @@ describe('Uygulama rolü (en az yetki)', () => {
   let owner: DataSource;
   let app: DataSource;
 
+  /** pg_stat_statements'ta metni `text` içeren sorgular (istatistikler çalıştırmalar arasında kalır). */
+  const statsContaining = (text: string) =>
+    owner.query(
+      `SELECT queryid FROM pg_stat_statements WHERE strpos(query, $1) > 0`,
+      [text],
+    );
+  const forgetStats = (text: string) =>
+    owner.query(
+      `SELECT pg_stat_statements_reset(0, 0, queryid) FROM pg_stat_statements WHERE strpos(query, $1) > 0`,
+      [text],
+    );
+
   beforeAll(async () => {
     owner = await connect();
     await owner.query(
       'TRUNCATE area_logs, user_last_location, areas RESTART IDENTITY CASCADE',
     );
+    // Önceki (düzeltme öncesi) çalıştırmalardan kalmış kayıtlar sonucu etkilemesin.
+    await forgetStats(PASSWORD);
     await ensureAppRole(owner, ROLE, PASSWORD);
     app = await connect((c) => ({
       ...c,
@@ -43,6 +58,44 @@ describe('Uygulama rolü (en az yetki)', () => {
     await expect(ensureAppRole(owner, ROLE, PASSWORD)).resolves.toBe(
       'güncellendi',
     );
+  });
+
+  it('şifre sunucuya düz metin gitmez: pg_stat_statements ve loglar görmez', async () => {
+    expect(await statsContaining(PASSWORD)).toEqual([]);
+    const [{ verifier }] = await owner.query(
+      `SELECT rolpassword AS verifier FROM pg_authid WHERE rolname = $1`,
+      [ROLE],
+    );
+    expect(verifier).toMatch(/^SCRAM-SHA-256\$4096:/);
+  });
+
+  it("gönderilen doğrulayıcı Postgres'in şifreden ürettiğiyle aynı (Türkçe karakterli şifre dahil)", async () => {
+    for (const [i, password] of [
+      'ascii-Sifre-42',
+      'şifre-ÇĞİÖŞÜ-ığ',
+    ].entries()) {
+      const probe = `scram_probe_${i}`;
+      await owner.query(`DROP ROLE IF EXISTS ${probe}`);
+      // Karşılaştırma için Postgres'e bir kez düz şifre verilir; kaydı hemen silinir.
+      const literal = password.replaceAll("'", "''");
+      await owner.query(`CREATE ROLE ${probe} PASSWORD '${literal}'`);
+      await forgetStats(password);
+      const [{ stored }] = await owner.query(
+        `SELECT rolpassword AS stored FROM pg_authid WHERE rolname = $1`,
+        [probe],
+      );
+      await owner.query(`DROP ROLE ${probe}`);
+      const [, iterations, salt] = /^SCRAM-SHA-256\$(\d+):([^$]+)\$/.exec(
+        stored,
+      )!;
+      expect(
+        scramSha256Verifier(
+          password,
+          Buffer.from(salt, 'base64'),
+          Number(iterations),
+        ),
+      ).toBe(stored);
+    }
   });
 
   it('superuser değildir, rol ya da veritabanı oluşturamaz', async () => {

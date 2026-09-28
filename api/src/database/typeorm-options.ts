@@ -16,7 +16,14 @@ export const MIGRATIONS = [
   QueryStats1727300000000,
 ];
 
-export function typeOrmOptions(config: AppConfig): DataSourceOptions {
+/**
+ * `lockTimeoutMs`: kilit bekleme sınırı; uygulama bağlantılarında kapalı (0), migration'larda
+ * açık (bkz. migrationOptions).
+ */
+export function typeOrmOptions(
+  config: AppConfig,
+  lockTimeoutMs = 0,
+): DataSourceOptions {
   return {
     type: 'postgres',
     host: config.db.host,
@@ -39,7 +46,22 @@ export function typeOrmOptions(config: AppConfig): DataSourceOptions {
       options: [
         `-c statement_timeout=${config.db.statementTimeoutMs}`,
         `-c idle_in_transaction_session_timeout=${config.db.idleInTransactionTimeoutMs}`,
+        `-c lock_timeout=${lockTimeoutMs}`,
       ].join(' '),
     },
   };
+}
+
+/**
+ * Migration bağlantısı. Sorgu süresi sınırı yok: büyük tabloda index oluşturmak uzun sürebilir.
+ * Kilit beklemesi ise sınırlı: tabloda uzun süren bir işlem (ör. VACUUM, uzun transaction)
+ * varsa deploy süresiz beklemez, hata verip durur ve tekrar denenebilir. Postgres'te kilit
+ * bekleyen bir ALTER TABLE arkasına gelen sorguları da bekletir. Bağlantı düzeyinde olduğu için
+ * transaction'lı ya da transaction'sız (CONCURRENTLY), ileri ya da geri her migration'a uygulanır.
+ */
+export function migrationOptions(config: AppConfig): DataSourceOptions {
+  return typeOrmOptions(
+    { ...config, db: { ...config.db, statementTimeoutMs: 0 } },
+    config.db.migrationLockTimeoutMs,
+  );
 }

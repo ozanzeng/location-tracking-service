@@ -7,7 +7,8 @@ import { App } from './App';
 import { loadRoadNetwork } from './roads/loadRoads';
 
 // Yol ağı (~280 KB) ilk çizimi beklemeden inmeye başlasın; bileşen aynı isteği kullanır.
-// Hata burada yutulur: yükleme bileşende yeniden denenir ve hata orada gösterilir.
+// Hata burada yutulur, bileşen gösterir. İstek bileşen açılmadan başarısız olduysa bileşen
+// yeniden dener; açıldıktan sonra başarısız olursa aynı hatayı alır (önceden de böyleydi).
 loadRoadNetwork().catch(() => undefined);
 
 createRoot(document.getElementById('root')!).render(

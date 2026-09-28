@@ -189,7 +189,7 @@ Tasarım kararları, 3 milyon giriş kaydı ve 50 bin kullanıcılı ayrı bir b
 
 **Zaman aşımları.** Her bağlantı `statement_timeout` (varsayılan 5 sn, `DB_STATEMENT_TIMEOUT_MS`) ve `idle_in_transaction_session_timeout` (varsayılan 30 sn, `DB_IDLE_TX_TIMEOUT_MS`) ile açılır. Takılan bir sorgu ya da açık bırakılmış bir transaction bağlantıyı ve kilitleri süresiz tutamaz. Migration'larda sorgu süresi sınırı yok.
 
-**Migration kilitleri.** Tablo ayarı değiştiren migration `SET LOCAL lock_timeout = '5s'` ile çalışır: tabloda uzun süren bir işlem (ör. VACUUM) varsa deploy süresiz beklemez, hata verip durur ve tekrar denenebilir. Postgres'te kilit bekleyen bir `ALTER TABLE` arkasına gelen sorguları da bekletir; yeni migration'larda, özellikle ağır kilit alan adımlarda, aynı kural uygulanmalı.
+**Migration kilitleri.** Migration bağlantısı `lock_timeout` ile açılır (varsayılan 5 sn, `DB_MIGRATION_LOCK_TIMEOUT_MS`): tabloda uzun süren bir işlem (ör. VACUUM, açık bir transaction) varsa deploy süresiz beklemez, hata verip durur ve tekrar denenebilir. Postgres'te kilit bekleyen bir `ALTER TABLE` arkasına gelen sorguları da bekletir; bu yüzden sınır önemli. Sınır bağlantı düzeyinde olduğu için transaction'lı ya da transaction'sız (`CONCURRENTLY`), ileri ya da geri her migration'a kendiliğinden uygulanır; migration dosyalarında `SET LOCAL` gerekmez (transaction dışında zaten etkisizdir). `CREATE INDEX CONCURRENTLY` de eski transaction'ların bitmesini beklerken bu sınıra takılabilir; o durumda kalan INVALID index, migration tekrar çalışınca yeniden oluşturulur.
 
 **Index'leri kilitlemeden oluşturma.** Yeni index'ler `CREATE INDEX CONCURRENTLY` ile eklenir; büyük tabloda yazmalar durmaz. Bu yüzden ilgili migration transaction dışında çalışır.
 
@@ -205,7 +205,7 @@ Tasarım kararları, 3 milyon giriş kaydı ve 50 bin kullanıcılı ayrı bir b
 - **CORS:** Production'da varsayılan olarak kapalıdır; `CORS_ORIGINS` ile izin verilen adresler açıkça verilir. Demo istemcileri nginx üzerinden aynı adresten sunulduğu için CORS'a ihtiyaç duymaz.
 - **Demo istemcilerinin anahtarı:** Anahtarı nginx ekler; tarayıcı kodunda görünmez. Ama bu, anahtarı saklamak anlamına gelmez: o nginx'e erişebilen herkes anahtarın yetkisiyle istek atabilir. Bu yüzden herkese açık sürücü uygulamasına sadece `INGEST_API_KEYS` yetkisi verilir. Tam yetkili operasyon uygulaması production'da iç ağda, VPN'de ya da SSO arkasında yayınlanmalıdır.
 - **Demo ortamı production değil:** `docker compose` demo için `NODE_ENV=development` ve herkesin bildiği anahtarlarla çalışır. JSON log ve kapalı CORS gibi production davranışları ise compose'ta açıkça seçildi. Gerçek ortamda `NODE_ENV=production`, `API_KEY` ve `DRIVER_API_KEY` secret olarak verilir; kısa anahtarla API açılmaz.
-- **Veritabanında en az yetki:** API ve worker, sadece yaptıkları işlere yetkili bir rolle bağlanır: `areas` için okuma ve ekleme, `area_logs` ve `user_last_location` için okuma, ekleme ve güncelleme. Silme, tablo boşaltma, şema değiştirme ve sunucuda komut çalıştırma (`COPY ... TO PROGRAM`) yetkisi yoktur. Rolü migrate betiği, şema sahibiyle çalışırken her seferinde oluşturur ya da günceller (`DB_APP_USER`, `DB_APP_PASSWORD`; `api/src/database/app-role.ts`). Şema sahibi superuser'dır ve sadece migrate'te kullanılır. Veritabanı testi, uygulamanın gerçek yazma yolunu bu rolle çalıştırır ve yasak işlemlerin reddedildiğini doğrular.
+- **Veritabanında en az yetki:** API ve worker, sadece yaptıkları işlere yetkili bir rolle bağlanır: `areas` için okuma ve ekleme, `area_logs` ve `user_last_location` için okuma, ekleme ve güncelleme. Silme, tablo boşaltma, şema değiştirme ve sunucuda komut çalıştırma (`COPY ... TO PROGRAM`) yetkisi yoktur. Rolü migrate betiği, şema sahibiyle çalışırken her seferinde oluşturur ya da günceller (`DB_APP_USER`, `DB_APP_PASSWORD`; `api/src/database/app-role.ts`). Şifre sunucuya düz metin değil, `psql`'in `\password` komutu gibi SCRAM-SHA-256 doğrulayıcısı olarak gönderilir: `ALTER ROLE ... PASSWORD` metni `pg_stat_statements`'a ve sunucu loglarına düşebilir. (İlk `pg_stat_statements` sürümünde şifre orada açık metin görünüyordu; kod incelemesi buldu, canlıda doğrulandı.) Şema sahibi superuser'dır ve sadece migrate'te kullanılır. Veritabanı testi, uygulamanın gerçek yazma yolunu bu rolle çalıştırır ve yasak işlemlerin reddedildiğini doğrular.
 - **Girdi doğrulama sınırları:** Zaman damgası saat dilimli olmalı ve var olan bir güne işaret etmeli; JS ile Postgres'in farklı yorumlayabileceği biçimler (`2024`, `2026-W39-1`, `20260928T100000Z`, `2026-02-30`) `400` alır. Önceden bunlar doğrulamadan geçip `500` veriyordu; sürücü uygulaması `5xx`'te tekrar denediği için tek bir böyle nokta cihazın kuyruğunu tıkayabilirdi. Sayfalama imlecindeki zaman ve kimlik de Postgres'e gitmeden doğrulanır.
 - `x-powered-by` başlığı kapalı; doğrulamada tanımsız alan içeren istekler reddedilir. JSON gövde sınırı 512 KB (10 bin köşeli polygon ~220 KB tutar).
 
@@ -225,19 +225,19 @@ Tasarım kararları, 3 milyon giriş kaydı ve 50 bin kullanıcılı ayrı bir b
 
 `loadtest/run.sh` k6'yı (sürümü sabit, 2.3.0) compose ağı içinde çalıştırır: 5.000 farklı scooter, 10 saniyelik ısınmadan sonra 70 saniyede 2.000 istek/sn'ye çıkan yük. Gecikme eşikleri yalnızca tepe senaryosunda ölçülür; ısınma (bağlantı havuzları, JIT) eşiklere girmez. Başlamadan önce tek bir istek atılır; adres ya da anahtar yanlışsa binlerce hata yerine hemen durur. İstekler 5 saniyede zaman aşımına uğrar.
 
-- **Hareket (`MOVE`):** `route` (varsayılan) her scooter'ı kendi yolunda ortalama ~19 km/sa ilerletir ve scooter'lar sırayla gönderir; gerçek bir filo gibi. `teleport` her istekte rastgele bir scooter'ı bölgede rastgele bir noktaya taşır; neredeyse her konum giriş/çıkış üretir (en kötü durum). Aşağıdaki ölçümlerin hepsi `teleport` ile yapıldı; karşılaştırma için `MOVE=teleport` kullanılmalı.
+- **Hareket (`MOVE`):** `route` (varsayılan) her scooter'ı kendi yolunda ortalama ~19 km/sa ilerletir ve scooter'lar sırayla gönderir; gerçek bir filo gibi. `teleport` her istekte rastgele bir scooter'ı bölgede rastgele bir noktaya taşır; neredeyse her konum giriş/çıkış üretir (en kötü durum). Aşağıdaki ölçümlerin hepsi `teleport` ile ve ısınmasız eski profille yapıldı. `MOVE=teleport` trafiğin biçimini aynı tutar ama profil değişti (10 sn ısınma, gecikme yalnızca tepede ölçülür). Bu yüzden yeni koşularda sadece worker hızı (boşalma) eski sayılarla karşılaştırılabilir; ortalama işleme ve gecikme yüzdelikleri karşılaştırılamaz. Önce/sonra karşılaştırması gerekirse eski kod da aynı betikle yeniden ölçülmeli.
 - **Profil (`PROFILE`):** `load` (varsayılan) ısınma + tepe. `soak` sabit hızda uzun süre (`SOAK_RPS`, varsayılan 500; `SOAK_DURATION`, varsayılan 30m): sızıntı, tablo şişmesi, bağlantı tükenmesi için. Henüz koşulmadı.
 
 Yük sırasında kuyruk derinliğini izler, ardından kuyruğun boşalmasını bekler ve iki hız yazar:
 
 - **Worker hızı (boşalma):** yük bittiğinde kuyrukta kalan işler / boşalma süresi. Worker'lar o sırada doygun çalıştığı için kapasiteye en yakın sayı budur.
-- **Ortalama işleme:** kabul edilen konum / toplam süre. k6'nın kaç istek gönderebildiğine bağlıdır; kapasite değil, alt sınırdır. 70 saniyelik profil ~100 bin istek gönderdiği için en fazla ~1.400 çıkabilir.
+- **Ortalama işleme:** kabul edilen konum / toplam süre (ısınma ve kuyruğun boşalması dahil). k6'nın kaç istek gönderebildiğine bağlıdır; kapasite değil, alt sınırdır. Profil (10 sn ısınma + 70 sn tepe) ~102 bin istek gönderdiği için en fazla ~1.270 çıkabilir; ısınmasız eski profilde bu tavan ~1.440'tı.
 
 k6 hedef hıza ulaşamazsa (düşen istek) koşu eşikten kalır: sonuçlar başka koşularla karşılaştırılamaz. Kabul edilen konumlar ayrı bir sayaçla (`accepted_locations`) sayılır. Betik k6'nın çıkış koduyla biter.
 
 ```bash
 PEAK_RPS=2000 WORKERS=2 ./loadtest/run.sh
-MOVE=teleport ./loadtest/run.sh                          # eski ölçümlerle karşılaştırma
+MOVE=teleport ./loadtest/run.sh                          # eski ölçümlerle aynı trafik (yukarıdaki nota bakın)
 PROFILE=soak SOAK_RPS=500 SOAK_DURATION=30m ./loadtest/run.sh
 ```
 
@@ -313,11 +313,11 @@ Statik kontroller: `api: npm run lint && npm run typecheck` (testler dahil tam t
 - Ayar doğrulama (anahtar kuralları sadece API sunucusunda), GeoJSON doğrulama, cursor.
 
 **Veritabanı** (gerçek PostGIS):
-- **Migration'lar:** boş bir veritabanında hepsi uygulanır, tamamen geri alınır ve tekrar uygulanır. Bu test, `CONCURRENTLY` index'li migration'ın geri alınamadığı bir hatayı yakaladı. Yarıda kalmış bir build'in bıraktığı INVALID index, migration tekrar çalışınca yeniden oluşturulur.
+- **Migration'lar:** boş bir veritabanında hepsi uygulanır, tamamen geri alınır ve tekrar uygulanır. Migration bağlantısında sorgu süresi sınırsız, kilit beklemesi sınırlıdır: kilitli bir tabloda transaction dışındaki bir adım da beklemeden hata verir. Bu test, `CONCURRENTLY` index'li migration'ın geri alınamadığı bir hatayı yakaladı. Yarıda kalmış bir build'in bıraktığı INVALID index, migration tekrar çalışınca yeniden oluşturulur.
 - **Kısıtlar:** Uygulama hata yapsa bile veritabanı şunları reddeder: geçersiz poligon, yanlış geometri tipi, bilinmeyen alan tipi, çıkışın girişten önce olması, aynı alanda iki açık giriş, var olmayan alana giriş. Alan silinince kayıtları da silinir.
 - **Sorgu planı regresyonları (200 bin kayıtla):** kritik sorgular beklenen index'i kullanır, son konum güncellemeleri %95'ten fazla HOT'tur, `area_logs` temizlik eşikleri yerindedir, `pg_stat_statements` sorguları kaydeder, `statement_timeout` uzun sorguyu keser.
 - **Son konumlar (`GET /locations/latest`):** zaman penceresi, en yeniden eskiye sıra (aynı saniyede kimliğe göre), limit, içinde bulunulan alanlar (kapanmış giriş sayılmaz).
-- **Uygulama rolü:** API'nin gerçek yazma yolu en az yetkili rolle çalışır; silme, boşaltma, şema değiştirme ve `COPY ... TO PROGRAM` reddedilir. Migration'lar kullanılmayan eklenti bırakmaz.
+- **Uygulama rolü:** API'nin gerçek yazma yolu en az yetkili rolle çalışır; silme, boşaltma, şema değiştirme ve `COPY ... TO PROGRAM` reddedilir. Şifre `pg_stat_statements`'a düşmez; gönderilen SCRAM doğrulayıcısı Postgres'in aynı şifreden ürettiğiyle birebir aynıdır (Türkçe karakterli şifre dahil). Migration'lar kullanılmayan eklenti bırakmaz.
 - **Veritabanı smoke:** bağlantı, PostGIS, bekleyen migration, gerekli ve geçerli (INVALID olmayan) index'ler, HOT ayarı, zaman aşımları, `synchronous_commit`.
 
 **Backend e2e** (gerçek PostGIS + Redis, ayrı test veritabanı ve kuyruk öneki):
@@ -335,7 +335,8 @@ Statik kontroller: `api: npm run lint && npm run typecheck` (testler dahil tam t
 - **Gönderim kuyruğu (`useOutbox`):** kaydedilen konumun zamanlayıcıyı beklemeden gönderilmesi, çevrimdışı birikim ve tek toplu istek, 100'lük gruplar, `429`'da `Retry-After` kadar bekleme, ağ hatasında noktaları kaybetmeme, `401`'de anahtar sorununu ne yapılacağıyla gösterme. Toplu istek tek hatalı nokta yüzünden `400` alırsa grup ikiye bölünür; sadece o nokta atılır. Ardışık hatalı noktalar (ör. saati ileri cihaz) baştan bölme yapılmadan, her biri tek istekle atılır. Gönderim sürerken kuyruk dolup baştan kırpılsa bile gönderilmemiş noktalar silinmez.
 - **Giriş kayıtları (`useLogs`, `LogsView`):** eski filtrenin geç gelen yanıtı ya da önceki sonraki-sayfa isteği yeni sonucu ezmez; ekran yalnızca olay odasına abone olur; filtreye yazmak ve bir kullanıcıya tıklamak tabloyu yeniden çizmez.
 - **Canlı harita:** geç gelen ilk yükleme canlı konumun üstüne yazmaz; soluklaşma ve düşme eşikleri; sayaçlar değişmedikçe yayınlanmaz.
-- **Levhalar (`useRiderEvents`) ve alan listesi (`useAreas`):** ekran kapanınca bekleyen levha zamanlayıcısı kalmaz; aynı anda gelen yenileme istekleri tek istekte birleşir.
+- **Levhalar (`useRiderEvents`):** ekran kapanınca bekleyen levha zamanlayıcısı kalmaz; scooter değişince öncekinin levhaları ve bölgeleri ekranda kalmaz.
+- **Alan listesi (`useAreas`):** süren bir liste isteği yeni alan kaydedilmeden başlamış olabilir; duyurulan ya da kaydedilen alan sonuçta yoksa bir kez daha istenir (aynı anda gelen yenilemeler tek ek istekte birleşir), varsa istek atılmaz.
 - **Canlı sayaçlar:** "hizmet bölgesi dışında" sayısı haritadaki gri noktalarla aynı kurala dayanır.
 - **Rota planlama (`useRoutePlanner`):** durak ekleme/silme, yasak bölge sınırı.
 - **Yol ağı:** yola yapıştırma, A*, yasak bölgeden kaçınma, gerçek Kadıköy verisi.

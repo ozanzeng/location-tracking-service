@@ -167,7 +167,15 @@ describe('loadConfig doğrulama', () => {
     expect(loadConfig({}).db).toMatchObject({
       statementTimeoutMs: 5000,
       idleInTransactionTimeoutMs: 30_000,
+      migrationLockTimeoutMs: 5000,
     });
+    expect(
+      loadConfig({ DB_MIGRATION_LOCK_TIMEOUT_MS: '0' }).db
+        .migrationLockTimeoutMs,
+    ).toBe(0);
+    expect(problemsFor({ DB_MIGRATION_LOCK_TIMEOUT_MS: 'abc' })).toHaveLength(
+      1,
+    );
     expect(
       loadConfig({ DB_STATEMENT_TIMEOUT_MS: '0' }).db.statementTimeoutMs,
     ).toBe(0);

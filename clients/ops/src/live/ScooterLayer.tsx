@@ -42,13 +42,16 @@ export function ScooterLayer({
     const all = scooters.current;
 
     const upsert = (p: Position, seenAt = Date.now()) => {
-      const types = p.areas.map((a) => a.type);
       const recordedAt = Date.parse(p.recordedAt);
-      const color = scooterColor(types);
       const existing = all.get(p.userId);
       if (existing) {
         existing.seenAt = Math.max(existing.seenAt, seenAt);
+        // Eski konum (ör. geç gelen ilk yükleme) reddedilir; renk vb. ancak ondan sonra hesaplanır.
         if (!isNewerPosition(existing.recordedAt, recordedAt)) return;
+      }
+      const types = p.areas.map((a) => a.type);
+      const color = scooterColor(types);
+      if (existing) {
         existing.marker.setLatLng([p.lat, p.lng]).setStyle({ fillColor: color, ...LIVE_STYLE });
         existing.types = types;
         existing.recordedAt = recordedAt;

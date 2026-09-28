@@ -36,7 +36,8 @@ export function AreasEditor() {
       draft.layer.remove();
       setDraft(null);
       setSaved(`${area.name} kaydedildi.`);
-      reload();
+      // Kimlik verilir: o sırada süren bir liste isteği kayıttan önce başlamışsa yeniden istenir.
+      reload(area.id);
       return true;
     } catch (err) {
       setError((err as Error).message);

@@ -8,8 +8,9 @@
 # - Worker hızı (boşalma): yük bittiğinde kuyrukta kalan işler / boşalma süresi. Worker'lar
 #   o sırada doygun çalışır, bu yüzden kapasiteye en yakın sayı budur. k6 durduğu için CPU'yu
 #   worker'lar paylaşır; yük sırasındaki hız bundan düşük olabilir.
-# - Ortalama işleme: kabul edilen / toplam süre. Yük profiliyle sınırlıdır (k6 kaç istek
-#   gönderebildiyse); kapasite değil, alt sınırdır.
+# - Ortalama işleme: kabul edilen / toplam süre (ısınma ve boşalma dahil). Yük profiliyle
+#   sınırlıdır (k6 kaç istek gönderebildiyse); kapasite değil, alt sınırdır. Isınma eklenmeden
+#   önceki koşularla karşılaştırılamaz (README).
 set -uo pipefail
 cd "$(dirname "$0")/.."
 

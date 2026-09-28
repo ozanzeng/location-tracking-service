@@ -44,6 +44,10 @@ export function useRiderEvents(scooterId: string) {
     socket.on(SocketEvent.POSITION, onPosition);
     return () => {
       for (const timer of timers) clearTimeout(timer);
+      // Scooter değişince önceki scooter'ın levhaları ve bölgeleri kalkar (zamanlayıcıları
+      // temizlendiği için kendiliğinden kalkmazlardı). Ekran kapanırken bunun etkisi yok.
+      setPlates([]);
+      setCurrentAreas([]);
       socket.off(SocketEvent.CONNECT, join);
       socket.off(SocketEvent.AREA_EVENT, onEvent);
       socket.off(SocketEvent.POSITION, onPosition);

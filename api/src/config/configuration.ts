@@ -14,6 +14,11 @@ export interface AppConfig {
     /** Transaction içinde boşta kalınabilecek en uzun süre (ms); 0 kapatır. Kilit sızmasın. */
     idleInTransactionTimeoutMs: number;
     /**
+     * Migration'ların kilit bekleme sınırı (ms); 0 kapatır. Uzun bir işlemin tuttuğu tabloda
+     * deploy süresiz beklemesin (bkz. migrationOptions).
+     */
+    migrationLockTimeoutMs: number;
+    /**
      * Migrate betiği için: API ve worker'ın bağlandığı, sadece gereken yetkileri olan rol
      * (bkz. database/app-role.ts). Verilmezse rol yönetilmez.
      */
@@ -252,6 +257,12 @@ export function loadConfig(
         30_000,
         0,
         3_600_000,
+      ),
+      migrationLockTimeoutMs: int(
+        'DB_MIGRATION_LOCK_TIMEOUT_MS',
+        5000,
+        0,
+        600_000,
       ),
       appUser: env.DB_APP_USER || undefined,
       appPassword: env.DB_APP_PASSWORD || undefined,

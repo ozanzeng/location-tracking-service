@@ -1,11 +1,13 @@
 import { DataSource, type DataSourceOptions } from 'typeorm';
-import { loadConfig } from '../../src/config/configuration.js';
+import { type AppConfig, loadConfig } from '../../src/config/configuration.js';
 import { revertLastMigration } from '../../src/database/migration-runner.js';
 import { OpenVisitIndexAndHotUpdates1727100000000 } from '../../src/database/migrations/1727100000000-OpenVisitIndexAndHotUpdates.js';
 import {
+  migrationOptions,
   MIGRATIONS,
   typeOrmOptions,
 } from '../../src/database/typeorm-options.js';
+import { expectPgError } from './db-helpers.js';
 
 const FRESH = 'geofence_migration_test';
 
@@ -13,6 +15,7 @@ const FRESH = 'geofence_migration_test';
 describe('Migration’lar (boş veritabanı)', () => {
   let admin: DataSource;
   let ds: DataSource;
+  let base: AppConfig;
 
   const tables = async () =>
     (
@@ -24,7 +27,7 @@ describe('Migration’lar (boş veritabanı)', () => {
     ).map((r: { table_name: string }) => r.table_name);
 
   beforeAll(async () => {
-    const base = loadConfig();
+    base = loadConfig();
     admin = await new DataSource({
       ...typeOrmOptions(base),
       database: 'postgres',
@@ -32,12 +35,9 @@ describe('Migration’lar (boş veritabanı)', () => {
     } as DataSourceOptions).initialize();
     await admin.query(`DROP DATABASE IF EXISTS ${FRESH}`);
     await admin.query(`CREATE DATABASE ${FRESH}`);
-    // Migration'lar gibi: sorgu süresi sınırı yok.
+    // Migrate betiğiyle aynı bağlantı ayarları.
     ds = await new DataSource(
-      typeOrmOptions({
-        ...base,
-        db: { ...base.db, name: FRESH, statementTimeoutMs: 0 },
-      }),
+      migrationOptions({ ...base, db: { ...base.db, name: FRESH } }),
     ).initialize();
   });
 
@@ -67,6 +67,43 @@ describe('Migration’lar (boş veritabanı)', () => {
       'pgcrypto',
       'postgis',
     ]);
+  });
+
+  it('migration bağlantısı: sorgu süresi sınırsız, kilit beklemesi sınırlı (5 sn)', async () => {
+    const [{ statement_timeout }] = await ds.query('SHOW statement_timeout');
+    const [{ lock_timeout }] = await ds.query('SHOW lock_timeout');
+    expect({ statement_timeout, lock_timeout }).toEqual({
+      statement_timeout: '0',
+      lock_timeout: '5s',
+    });
+  });
+
+  it('kilitli tabloda migration süresiz beklemez, transaction dışında da', async () => {
+    // Tabloyu uzun bir işlem tutuyor (ör. VACUUM, açık transaction).
+    const holder = ds.createQueryRunner();
+    await holder.connect();
+    await holder.startTransaction();
+    await holder.query('LOCK TABLE areas IN ACCESS EXCLUSIVE MODE');
+    const short = await new DataSource(
+      migrationOptions({
+        ...base,
+        db: { ...base.db, name: FRESH, migrationLockTimeoutMs: 300 },
+      }),
+    ).initialize();
+    try {
+      const started = Date.now();
+      // 55P03: lock_not_available. Transaction'sız (CONCURRENTLY gibi) çalıştırılır: SET LOCAL
+      // burada etkisiz kalırdı.
+      await expectPgError(
+        short.query('ALTER TABLE areas SET (fillfactor = 90)'),
+        '55P03',
+      );
+      expect(Date.now() - started).toBeLessThan(3000);
+    } finally {
+      await holder.rollbackTransaction();
+      await holder.release();
+      await short.destroy();
+    }
   });
 
   it('hepsi geri alınabilir (down) ve şema tamamen kalkar', async () => {
