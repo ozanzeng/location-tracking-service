@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { memo, useMemo } from 'react';
 import { CircleMarker, Polyline } from 'react-leaflet';
 import type { LatLng } from '../geo/latlng';
 
@@ -6,8 +6,11 @@ const LINE = { color: '#1F5FAD', weight: 4, opacity: 0.85, lineCap: 'round', lin
 const STOP = { color: '#1F5FAD', weight: 2, fillColor: '#1F5FAD', fillOpacity: 1 };
 const STOP_TO_REMOVE = { color: '#fff', weight: 2, fillColor: '#D7263D', fillOpacity: 1 };
 
-/** Planlanan rota çizgisi ve duraklar; silinecek durak (üzerine gelinmiş) kırmızı ve büyük. */
-export function RouteLayer({
+/**
+ * Planlanan rota çizgisi ve duraklar; silinecek durak (üzerine gelinmiş) kırmızı ve büyük.
+ * memo: oynatmada ekran her adımda çizilir, rota ise değişmez.
+ */
+export const RouteLayer = memo(function RouteLayer({
   path,
   stops,
   hoveredStop,
@@ -31,4 +34,4 @@ export function RouteLayer({
       ))}
     </>
   );
-}
+});

@@ -1,9 +1,10 @@
+import { memo } from 'react';
 import type { DeviceLogEntry } from './useOutbox';
 
 const timeFmt = new Intl.DateTimeFormat('tr-TR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
-/** Cihaz ile servis arasındaki alışverişin kaydı: ne gönderildi, sunucu ne dedi. */
-export function DeviceLog({ entries }: { entries: DeviceLogEntry[] }) {
+/** Cihaz ile servis arasındaki alışverişin kaydı: ne gönderildi, sunucu ne dedi. memo: oynatmada ekran her adımda çizilir. */
+export const DeviceLog = memo(function DeviceLog({ entries }: { entries: DeviceLogEntry[] }) {
   return (
     <section className="device-log">
       <h2>Cihaz günlüğü</h2>
@@ -22,4 +23,4 @@ export function DeviceLog({ entries }: { entries: DeviceLogEntry[] }) {
       )}
     </section>
   );
-}
+});

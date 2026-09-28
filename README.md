@@ -175,7 +175,9 @@ Tasarım kararları, 3 milyon giriş kaydı ve 50 bin kullanıcılı ayrı bir b
 
 **Açık girişler için kısmi index.** "Hâlâ içeride" filtresiyle listenin sonuna gelindiğinde veritabanı tüm tabloyu tarıyordu (2,27 sn). Sadece açık girişleri kapsayan index (`WHERE exit_time IS NULL`, 544 KB) bunu 0,04 ms'ye indirdi.
 
-**Son konum güncellemeleri HOT.** `user_last_location` her konumda güncellenir. `recorded_at` üzerindeki index bu güncellemelerin index'e dokunmadan yapılmasını (HOT) engelliyordu: HOT oranı %0'dı ve tablo 30 saniyelik yükte 5 MB'tan 15 MB'a şişiyordu. Index kaldırıldı ve sayfalarda güncelleme payı bırakıldı (`fillfactor=70`); HOT oranı %100 oldu, şişme durdu ve worker transaction'ı %6,5 hızlandı. Bu index'i kullanan tek sorgu (`GET /locations/latest`) artık tabloyu tarıyor; 50 bin kullanıcıda 11 ms sürüyor ve sadece operasyon ekranı açılırken çalışıyor. `fillfactor` yeni sayfalara uygulanır: var olan bir kurulumda etkisi için tablo bir kez `VACUUM FULL user_last_location` ile yeniden yazılmalı. Migration bunu kilit tutmamak için kendisi yapmaz.
+**Son konum güncellemeleri HOT.** `user_last_location` her konumda güncellenir. `recorded_at` üzerindeki index bu güncellemelerin index'e dokunmadan yapılmasını (HOT) engelliyordu: HOT oranı %0'dı ve tablo 30 saniyelik yükte 5 MB'tan 15 MB'a şişiyordu. Index kaldırıldı ve sayfalarda güncelleme payı bırakıldı (`fillfactor=70`); HOT oranı %100 oldu, şişme durdu ve worker transaction'ı %6,5 hızlandı. Bu index'i kullanan tek sorgu (`GET /locations/latest`) artık tabloyu tarıyor ve sadece operasyon ekranı açılırken çalışıyor. Sorgu önce en yeni kullanıcıları seçer, içinde oldukları alanları yalnızca onlar için okur (önceden penceredeki bütün kullanıcıları birleştirip gruplayıp sonra kesiyordu). 50 bin kullanıcı ve 1 milyon giriş kaydında (30 dk, limit 1000) 40 ms'den 9 ms'ye indi. Operasyon ekranının kullandığı 1 dakikalık pencerede iki sürüm de ~3 ms; sonuçlar birebir aynı (aynı saniyedeki kullanıcılar arasında sıra artık kimliğe göre belirli). `fillfactor` yeni sayfalara uygulanır: var olan bir kurulumda etkisi için tablo bir kez `VACUUM FULL user_last_location` ile yeniden yazılmalı. Migration bunu kilit tutmamak için kendisi yapmaz.
+
+**Giriş kayıtlarında temizlik eşikleri.** `area_logs`'ta her çıkış bir satırı günceller. `exit_time` kısmi index'lerin koşulunda geçtiği için bu güncelleme HOT olamaz: ölü satır bırakır ve bütün index'lere yeni kayıt ekler. Varsayılan eşikle (%20) 100 milyon kayıtta otomatik temizlik ancak 20 milyon çıkıştan sonra başlardı. Temizlik, eklemeyle tetiklenen temizlik ve istatistik eşikleri %2'ye çekildi; tablo büyüdükçe seyrekleşmezler. Etkisi bu ortamda ölçülmedi (büyük ve uzun süre yazılan bir tablo gerekir).
 
 **Dayanıklılık: giriş kayıtları kaybolmaz.** `synchronous_commit` varsayılan (açık) ayarında. Giriş veya çıkış üretmeyen konumlarda, ki bunlar konumların çoğu, uygulama transaction içinde `SET LOCAL synchronous_commit = off` kullanır. Bir çökmede kaybolabilecek tek şey son konumdur ve bir sonraki konumla (5 sn) zaten yenilenir. Giriş kayıtları her zaman diske yazılarak onaylanır. Redis kuyruğu da diske yazılır (AOF, saniyede bir).
 
@@ -186,6 +188,8 @@ Tasarım kararları, 3 milyon giriş kaydı ve 50 bin kullanıcılı ayrı bir b
 | Tamamen kapalı (önceki ayar) | 6.008 | kaybolabilir |
 
 **Zaman aşımları.** Her bağlantı `statement_timeout` (varsayılan 5 sn, `DB_STATEMENT_TIMEOUT_MS`) ve `idle_in_transaction_session_timeout` (varsayılan 30 sn, `DB_IDLE_TX_TIMEOUT_MS`) ile açılır. Takılan bir sorgu ya da açık bırakılmış bir transaction bağlantıyı ve kilitleri süresiz tutamaz. Migration'larda sorgu süresi sınırı yok.
+
+**Migration kilitleri.** Tablo ayarı değiştiren migration `SET LOCAL lock_timeout = '5s'` ile çalışır: tabloda uzun süren bir işlem (ör. VACUUM) varsa deploy süresiz beklemez, hata verip durur ve tekrar denenebilir. Postgres'te kilit bekleyen bir `ALTER TABLE` arkasına gelen sorguları da bekletir; yeni migration'larda, özellikle ağır kilit alan adımlarda, aynı kural uygulanmalı.
 
 **Index'leri kilitlemeden oluşturma.** Yeni index'ler `CREATE INDEX CONCURRENTLY` ile eklenir; büyük tabloda yazmalar durmaz. Bu yüzden ilgili migration transaction dışında çalışır.
 
@@ -212,21 +216,29 @@ Tasarım kararları, 3 milyon giriş kaydı ve 50 bin kullanıcılı ayrı bir b
   - Worker'da: işleme süresi, kuyrukta bekleme süresi (`location_job_lag_seconds`), alan giriş ve çıkış sayıları, denemeleri tükenen işler.
   - Her ikisinde de Node süreç metrikleri.
   - Worker'ın HTTP API'si olmadığı için metrikleri ayrı bir portta (`WORKER_METRICS_PORT`, varsayılan 9100) yayınlanır.
+- **Sorgu istatistikleri:** `pg_stat_statements` açık (compose'da `shared_preload_libraries`, eklentiyi migration kurar). Yük testinden sonra hangi sorgunun toplamda ne kadar zaman harcadığı `SELECT calls, total_exec_time, query FROM pg_stat_statements ORDER BY total_exec_time DESC LIMIT 10` ile görülür. Eklenti "trusted" olmadığı için yönetilen bir veritabanında migration kullanıcısı superuser değilse bu adım atlanır; orada sağlayıcının ayarından açılır.
 - **Loglar:** Production'da tek satır JSON; log toplayıcılar doğrudan ayrıştırabilir. Seviye `LOG_LEVEL` ile, format `LOG_FORMAT=json|pretty` ile ayarlanır. Her istek için erişim logu `verbose` seviyesindedir ve varsayılan olarak kapalıdır, yük altında log hacmi patlamasın diye.
 - **İstek kimliği:** Gelen `x-request-id` korunur, yoksa üretilir ve yanıtta döner. Kimlik işle birlikte kuyruğa gider; worker'daki hata logları aynı kimliği taşır, böylece bir istek API'den worker'a kadar izlenebilir. API'de beklenmeyen hatalar (`500`) da istek kimliği, method ve yolla tek satır loglanır; yanıt gövdesinde de kimlik döner.
 - **Redis kesintisinde loglar:** Bağlantı hataları tek satır uyarı olarak loglanır ve 10 saniyede bire seyreltilir (aradaki tekrarlar sayılır). Önceden her yeniden bağlanma denemesi JSON dışı, çok satırlı yığın izi basıyordu.
 
 ## Performans
 
-`loadtest/run.sh` k6'yı compose ağı içinde çalıştırır: 5.000 farklı scooter, 70 saniyede 2.000 istek/sn'ye çıkan yük. Yük sırasında kuyruk derinliğini izler, ardından kuyruğun boşalmasını bekler ve iki hız yazar:
+`loadtest/run.sh` k6'yı (sürümü sabit, 2.3.0) compose ağı içinde çalıştırır: 5.000 farklı scooter, 10 saniyelik ısınmadan sonra 70 saniyede 2.000 istek/sn'ye çıkan yük. Gecikme eşikleri yalnızca tepe senaryosunda ölçülür; ısınma (bağlantı havuzları, JIT) eşiklere girmez. Başlamadan önce tek bir istek atılır; adres ya da anahtar yanlışsa binlerce hata yerine hemen durur. İstekler 5 saniyede zaman aşımına uğrar.
+
+- **Hareket (`MOVE`):** `route` (varsayılan) her scooter'ı kendi yolunda ortalama ~19 km/sa ilerletir ve scooter'lar sırayla gönderir; gerçek bir filo gibi. `teleport` her istekte rastgele bir scooter'ı bölgede rastgele bir noktaya taşır; neredeyse her konum giriş/çıkış üretir (en kötü durum). Aşağıdaki ölçümlerin hepsi `teleport` ile yapıldı; karşılaştırma için `MOVE=teleport` kullanılmalı.
+- **Profil (`PROFILE`):** `load` (varsayılan) ısınma + tepe. `soak` sabit hızda uzun süre (`SOAK_RPS`, varsayılan 500; `SOAK_DURATION`, varsayılan 30m): sızıntı, tablo şişmesi, bağlantı tükenmesi için. Henüz koşulmadı.
+
+Yük sırasında kuyruk derinliğini izler, ardından kuyruğun boşalmasını bekler ve iki hız yazar:
 
 - **Worker hızı (boşalma):** yük bittiğinde kuyrukta kalan işler / boşalma süresi. Worker'lar o sırada doygun çalıştığı için kapasiteye en yakın sayı budur.
 - **Ortalama işleme:** kabul edilen konum / toplam süre. k6'nın kaç istek gönderebildiğine bağlıdır; kapasite değil, alt sınırdır. 70 saniyelik profil ~100 bin istek gönderdiği için en fazla ~1.400 çıkabilir.
 
-k6 hedef hıza ulaşamazsa (düşen istek) ya da eşikler kalırsa betik bunu da yazar ve k6'nın çıkış koduyla biter.
+k6 hedef hıza ulaşamazsa (düşen istek) koşu eşikten kalır: sonuçlar başka koşularla karşılaştırılamaz. Kabul edilen konumlar ayrı bir sayaçla (`accepted_locations`) sayılır. Betik k6'nın çıkış koduyla biter.
 
 ```bash
 PEAK_RPS=2000 WORKERS=2 ./loadtest/run.sh
+MOVE=teleport ./loadtest/run.sh                          # eski ölçümlerle karşılaştırma
+PROFILE=soak SOAK_RPS=500 SOAK_DURATION=30m ./loadtest/run.sh
 ```
 
 Ortam: MacBook, Docker VM'e ayrılmış **2 vCPU / 2 GB RAM**. API, worker'lar, Postgres, Redis ve k6 bu 2 CPU'yu paylaşıyor.
@@ -249,7 +261,7 @@ Güncel sürüm (dayanıklılık değişikliğinden önce), 2 worker, ısınmı�
 
 Worker sayısının etkisi (önceki sürümle ölçüldü): 1 worker ile 1.258, 2 worker ile 1.259 konum/sn. Bu ortalama, yük profilinin tavanına (~1.400) yakın olduğu için worker sayısının etkisini göstermeye yetmez; CPU'nun zaten dolu olması da (aşağıda) aynı yönde.
 
-**5 saniyelik gönderim sıklığına göre kapasite:** Kullanıcı başına saniyede 0,2 konum düşüyor. Dayanıklılık değişikliğinden sonraki ortalama işleme (~1.130 konum/sn) bu 2 vCPU'luk ortamda **en az ~5.650 eşzamanlı aktif kullanıcıya** karşılık geliyor (önceki ölçümle ~1.270 konum/sn, ~6.300 kullanıcı). Ortalama bir alt sınır olduğu için gerçek kapasite daha yüksek olabilir; bunu uzun süreli sabit yükle (soak) ölçmek sıradaki adım. Bunun üzerindeki ani yüklerde API hâlâ cevap veriyor, fark kuyrukta birikip sonra eritiliyor.
+**5 saniyelik gönderim sıklığına göre kapasite:** Kullanıcı başına saniyede 0,2 konum düşüyor. Dayanıklılık değişikliğinden sonraki ortalama işleme (~1.130 konum/sn) bu 2 vCPU'luk ortamda **en az ~5.650 eşzamanlı aktif kullanıcıya** karşılık geliyor (önceki ölçümle ~1.270 konum/sn, ~6.300 kullanıcı). Ortalama bir alt sınır olduğu için gerçek kapasite daha yüksek olabilir; bunu uzun süreli sabit yükle ölçmek (`PROFILE=soak`) sıradaki adım. Bunun üzerindeki ani yüklerde API hâlâ cevap veriyor, fark kuyrukta birikip sonra eritiliyor.
 
 **Kullanıcı şeritleri öncesi ve sonrası (aynı gün, aynı ortam, aynı k6 senaryosu, 2 worker):**
 
@@ -280,9 +292,9 @@ docker compose up -d --build
 
 | | Birim | E2E | Smoke (veri yazmaz*) |
 |---|---|---|---|
-| **Backend** | 156 test · `api: npm test` | 67 test · `api: npm run test:e2e` | `api: npm run smoke` |
-| **Veritabanı** | 28 test · `api: npm run test:db` | (backend e2e içinde) | `api: npm run smoke:db` |
-| **Frontend** | 77 test · `clients: npm run test:unit` | 18 tarayıcı testi · `clients: npm run test:ui` | `clients: npm run smoke` |
+| **Backend** | 156 test · `api: npm test` | 68 test · `api: npm run test:e2e` | `api: npm run smoke` |
+| **Veritabanı** | 33 test · `api: npm run test:db` | (backend e2e içinde) | `api: npm run smoke:db` |
+| **Frontend** | 90 test · `clients: npm run test:unit` | 18 tarayıcı testi · `clients: npm run test:ui` | `clients: npm run smoke` |
 
 \* Backend smoke testi, gerçek akışı denemek için tek bir sabit test alanı ve benzersiz bir test kullanıcısıyla konum gönderir.
 
@@ -303,7 +315,8 @@ Statik kontroller: `api: npm run lint && npm run typecheck` (testler dahil tam t
 **Veritabanı** (gerçek PostGIS):
 - **Migration'lar:** boş bir veritabanında hepsi uygulanır, tamamen geri alınır ve tekrar uygulanır. Bu test, `CONCURRENTLY` index'li migration'ın geri alınamadığı bir hatayı yakaladı. Yarıda kalmış bir build'in bıraktığı INVALID index, migration tekrar çalışınca yeniden oluşturulur.
 - **Kısıtlar:** Uygulama hata yapsa bile veritabanı şunları reddeder: geçersiz poligon, yanlış geometri tipi, bilinmeyen alan tipi, çıkışın girişten önce olması, aynı alanda iki açık giriş, var olmayan alana giriş. Alan silinince kayıtları da silinir.
-- **Sorgu planı regresyonları (200 bin kayıtla):** kritik sorgular beklenen index'i kullanır, son konum güncellemeleri %95'ten fazla HOT'tur, `statement_timeout` uzun sorguyu keser.
+- **Sorgu planı regresyonları (200 bin kayıtla):** kritik sorgular beklenen index'i kullanır, son konum güncellemeleri %95'ten fazla HOT'tur, `area_logs` temizlik eşikleri yerindedir, `pg_stat_statements` sorguları kaydeder, `statement_timeout` uzun sorguyu keser.
+- **Son konumlar (`GET /locations/latest`):** zaman penceresi, en yeniden eskiye sıra (aynı saniyede kimliğe göre), limit, içinde bulunulan alanlar (kapanmış giriş sayılmaz).
 - **Uygulama rolü:** API'nin gerçek yazma yolu en az yetkili rolle çalışır; silme, boşaltma, şema değiştirme ve `COPY ... TO PROGRAM` reddedilir. Migration'lar kullanılmayan eklenti bırakmaz.
 - **Veritabanı smoke:** bağlantı, PostGIS, bekleyen migration, gerekli ve geçerli (INVALID olmayan) index'ler, HOT ayarı, zaman aşımları, `synchronous_commit`.
 
@@ -315,12 +328,14 @@ Statik kontroller: `api: npm run lint && npm run typecheck` (testler dahil tam t
 - Birikmiş kuyrukta aynı kullanıcının işlerinin uçtan uca sırayla işlenmesi; şeritlerden önceki kuyrukta kalmış eski biçimdeki işler.
 - İki kez takılan (donan worker'larda kalan) işin kaybolmayıp sonraki worker'da işlenmesi.
 - Kapanış sırasında sürekli gelen isteklerin hiçbirinin `500` almaması; `500` yerine `400`: çözülemeyen zaman damgaları, geçersiz imleç, bozuk JSON; `413`: gövde sınırı; 10 bin köşeli polygon kabul, fazlası açıklamalı `400`.
-- API anahtarı ve sürücü anahtarının sınırları (HTTP ve WebSocket; sürücü bağlantısının tek kullanıcı odasında tutulması), rate limit (sınırdan büyük toplu istek, reddin kotadan düşmemesi, toplu istekte bir kullanıcı sınırdaysa diğerlerinin sayacına dokunulmaması; testler dakikalık pencerenin sonuna denk gelmesin diye pencerede en az 10 sn kalınca başlar), `503` backpressure, metrikler, canlı yayın ve alan duyurusu, ping'e cevap vermeyen bağlantının kapatılması.
+- API anahtarı ve sürücü anahtarının sınırları (HTTP ve WebSocket; sürücü bağlantısının tek kullanıcı odasında tutulması), rate limit (sınırdan büyük toplu istek, reddin kotadan düşmemesi, toplu istekte bir kullanıcı sınırdaysa diğerlerinin sayacına dokunulmaması; testler dakikalık pencerenin sonuna denk gelmesin diye pencerede en az 10 sn kalınca başlar), `503` backpressure, metrikler, canlı yayın ve alan duyurusu, olay odasının (`events`) konum yayını almaması ve tam yetki istemesi, ping'e cevap vermeyen bağlantının kapatılması.
 
 **Frontend birim** (Vitest, hook'lar için jsdom):
 - **Konum ölçümü (`useGpsSampler`):** 5 saniyede bir ölçüm; alana girince ve çıkınca beklemeden ölçüm, ardından düzenli ölçümün oradan devam etmesi; aynı alanlar içinde hareketin ve yeni tanımlanan alanın ek ölçüm yapmaması; sınırda gidip gelince saniyede en fazla bir ölçüm; sürüklerken (bırakmadan) sınır geçişi; bağlantı durumu değişince ölçümün baştan başlamaması.
 - **Gönderim kuyruğu (`useOutbox`):** kaydedilen konumun zamanlayıcıyı beklemeden gönderilmesi, çevrimdışı birikim ve tek toplu istek, 100'lük gruplar, `429`'da `Retry-After` kadar bekleme, ağ hatasında noktaları kaybetmeme, `401`'de anahtar sorununu ne yapılacağıyla gösterme. Toplu istek tek hatalı nokta yüzünden `400` alırsa grup ikiye bölünür; sadece o nokta atılır. Ardışık hatalı noktalar (ör. saati ileri cihaz) baştan bölme yapılmadan, her biri tek istekle atılır. Gönderim sürerken kuyruk dolup baştan kırpılsa bile gönderilmemiş noktalar silinmez.
-- **Giriş kayıtları (`useLogs`):** eski filtrenin geç gelen yanıtı ya da önceki sonraki-sayfa isteği yeni sonucu ezmez.
+- **Giriş kayıtları (`useLogs`, `LogsView`):** eski filtrenin geç gelen yanıtı ya da önceki sonraki-sayfa isteği yeni sonucu ezmez; ekran yalnızca olay odasına abone olur; filtreye yazmak ve bir kullanıcıya tıklamak tabloyu yeniden çizmez.
+- **Canlı harita:** geç gelen ilk yükleme canlı konumun üstüne yazmaz; soluklaşma ve düşme eşikleri; sayaçlar değişmedikçe yayınlanmaz.
+- **Levhalar (`useRiderEvents`) ve alan listesi (`useAreas`):** ekran kapanınca bekleyen levha zamanlayıcısı kalmaz; aynı anda gelen yenileme istekleri tek istekte birleşir.
 - **Canlı sayaçlar:** "hizmet bölgesi dışında" sayısı haritadaki gri noktalarla aynı kurala dayanır.
 - **Rota planlama (`useRoutePlanner`):** durak ekleme/silme, yasak bölge sınırı.
 - **Yol ağı:** yola yapıştırma, A*, yasak bölgeden kaçınma, gerçek Kadıköy verisi.
@@ -379,7 +394,7 @@ Sürücü ──konum──▶ API ──kuyruk──▶ Worker ──giriş/ç�
 
 **Operasyon uygulaması** (`clients/ops`, :8080):
 - **Canlı izleme:** Son 60 saniyede konum göndermiş scooter'lar aktif sayılır. 15 saniyedir sessiz olan soluk görünür; sürüş bitmiş, sekme kapanmış ya da bağlantı kopmuş olabilir. 60 saniyede listeden düşer. Scooter'lar bulundukları bölgeye göre renklenir. Yanında anlık sayaçlar ve giriş/çıkış akışı var. Konumlar sunucuda 200 ms'lik gruplar halinde gönderilir; tarayıcıda React state'ine girmeden doğrudan Leaflet katmanında güncellenir.
-- **Giriş kayıtları:** `GET /logs` üzerinde kullanıcı, alan, durum (içeride veya çıkmış) ve giriş zamanı aralığı filtreleri. Cursor ile "daha fazla göster" ve kalış süresi. Yeni girişler geldikçe "N yeni giriş" bildirimi çıkar.
+- **Giriş kayıtları:** `GET /logs` üzerinde kullanıcı, alan, durum (içeride veya çıkmış) ve giriş zamanı aralığı filtreleri. Cursor ile "daha fazla göster" ve kalış süresi. Yeni girişler geldikçe "N yeni giriş" bildirimi çıkar. Bu ekran canlı yayında yalnızca olay odasına (`events`) abone olur: tüm filonun konum yayınını (200 ms'de bir) almaz. Filtreye yazmak ya da yeni giriş sayacı tabloyu yeniden çizmez.
 - **Alanlar:** Çokgen veya dikdörtgen çizilip kaydedilir. Servis yeni alanı Redis üzerinden duyurur (`areas-changed`); açık sürücü uygulamaları haritayı sayfa yenilemeden günceller.
 - Üst çubukta `/health`'ten beslenen sistem durumu: veritabanı, Redis ve kuyrukta bekleyen konumlar.
 

@@ -17,6 +17,8 @@ export function useRiderEvents(scooterId: string) {
 
   useEffect(() => {
     const socket = getSocket();
+    // Levhaları kapatan zamanlayıcılar: ekran kapanınca ya da scooter değişince temizlenir.
+    const timers = new Set<ReturnType<typeof setTimeout>>();
     const join = () => socket.emit(SocketEvent.SUBSCRIBE, { userId: scooterId });
     const onEvent = (event: AreaEvent) => {
       if (event.userId !== scooterId) return;
@@ -27,7 +29,11 @@ export function useRiderEvents(scooterId: string) {
         areaName: event.area.name,
       };
       setPlates((list) => [plate, ...list].slice(0, 3));
-      setTimeout(() => dismiss(plate.key), PLATE_MS);
+      const timer = setTimeout(() => {
+        timers.delete(timer);
+        dismiss(plate.key);
+      }, PLATE_MS);
+      timers.add(timer);
     };
     const onPosition = (p: Position) => {
       if (p.userId === scooterId) setCurrentAreas(p.areas);
@@ -37,6 +43,7 @@ export function useRiderEvents(scooterId: string) {
     socket.on(SocketEvent.AREA_EVENT, onEvent);
     socket.on(SocketEvent.POSITION, onPosition);
     return () => {
+      for (const timer of timers) clearTimeout(timer);
       socket.off(SocketEvent.CONNECT, join);
       socket.off(SocketEvent.AREA_EVENT, onEvent);
       socket.off(SocketEvent.POSITION, onPosition);

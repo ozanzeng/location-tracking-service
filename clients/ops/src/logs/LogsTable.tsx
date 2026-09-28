@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import type { LogEntry } from '@shared/api/types';
 import { SignIcon } from '@shared/zones/SignIcon';
 import { formatDuration } from './duration';
@@ -10,8 +11,18 @@ const dateFmt = new Intl.DateTimeFormat('tr-TR', {
   second: '2-digit',
 });
 
-/** Giriş kayıtları tablosu; kullanıcıya tıklamak o kullanıcıyla filtrelemeyi hazırlar. */
-export function LogsTable({ rows, onPickUser }: { rows: LogEntry[]; onPickUser: (userId: string) => void }) {
+/**
+ * Giriş kayıtları tablosu; kullanıcıya tıklamak o kullanıcıyla filtrelemeyi hazırlar.
+ * memo: "daha fazla göster" ile satırlar yüzlerce olabilir; filtre formundaki her tuş vuruşu
+ * ya da gelen her yeni giriş (sayaç) tabloyu baştan çizmesin. Satırlar değişince çizilir.
+ */
+export const LogsTable = memo(function LogsTable({
+  rows,
+  onPickUser,
+}: {
+  rows: LogEntry[];
+  onPickUser: (userId: string) => void;
+}) {
   return (
     <table className="logs">
       <thead>
@@ -58,4 +69,4 @@ export function LogsTable({ rows, onPickUser }: { rows: LogEntry[]; onPickUser: 
       </tbody>
     </table>
   );
-}
+});

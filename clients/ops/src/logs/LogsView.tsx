@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import { useAreas } from '@shared/hooks/useAreas';
 import { EMPTY_FILTERS, isEmpty, type LogFilters } from './logFilters';
 import { LogFiltersForm } from './LogFiltersForm';
@@ -11,6 +11,8 @@ export function LogsView() {
   const [draft, setDraft] = useState<LogFilters>(EMPTY_FILTERS);
   const [applied, setApplied] = useState<LogFilters>(EMPTY_FILTERS);
   const logs = useLogs(applied);
+  // Sabit kimlik: tablo (memo) filtre yazarken yeniden çizilmesin.
+  const pickUser = useCallback((userId: string) => setDraft((d) => ({ ...d, userId })), []);
 
   return (
     <div className="page">
@@ -38,7 +40,7 @@ export function LogsView() {
       {logs.error ? <p className="error">Kayıtlar yüklenemedi: {logs.error}</p> : null}
 
       <div className="table-wrap">
-        <LogsTable rows={logs.rows} onPickUser={(userId) => setDraft((d) => ({ ...d, userId }))} />
+        <LogsTable rows={logs.rows} onPickUser={pickUser} />
         {!logs.rows.length && !logs.loading ? (
           <p className="hint logs__empty">
             {isEmpty(applied)

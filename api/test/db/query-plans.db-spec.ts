@@ -115,6 +115,27 @@ describe('Sorgu planları ve performans ayarları', () => {
     expect(hot / upd).toBeGreaterThan(0.95);
   });
 
+  it('area_logs: temizlik ve istatistik eşikleri tablo büyüdükçe seyrekleşmez (%2)', async () => {
+    const [{ reloptions }] = await ds.query(
+      `SELECT reloptions FROM pg_class WHERE relname = 'area_logs'`,
+    );
+    expect(reloptions).toEqual(
+      expect.arrayContaining([
+        'autovacuum_vacuum_scale_factor=0.02',
+        'autovacuum_vacuum_insert_scale_factor=0.02',
+        'autovacuum_analyze_scale_factor=0.02',
+      ]),
+    );
+  });
+
+  it('pg_stat_statements sorguları kaydeder (yük testinde darboğazı bulmak için)', async () => {
+    await ds.query(`SELECT 42 AS pgss_probe`);
+    const [{ calls }] = await ds.query(
+      `SELECT coalesce(sum(calls), 0)::int AS calls FROM pg_stat_statements WHERE query LIKE '%pgss_probe%'`,
+    );
+    expect(calls).toBeGreaterThan(0);
+  });
+
   it('statement_timeout uzun sorguyu keser', async () => {
     const short = await connect((c) => ({
       ...c,

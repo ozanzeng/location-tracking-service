@@ -1,6 +1,7 @@
 import { DataSource, type DataSourceOptions } from 'typeorm';
 import { loadConfig } from '../../src/config/configuration.js';
 import { revertLastMigration } from '../../src/database/migration-runner.js';
+import { OpenVisitIndexAndHotUpdates1727100000000 } from '../../src/database/migrations/1727100000000-OpenVisitIndexAndHotUpdates.js';
 import {
   MIGRATIONS,
   typeOrmOptions,
@@ -62,6 +63,7 @@ describe('Migration’lar (boş veritabanı)', () => {
       `SELECT extname FROM pg_extension WHERE extname <> 'plpgsql' ORDER BY 1`,
     );
     expect(extensions.map((e: { extname: string }) => e.extname)).toEqual([
+      'pg_stat_statements',
       'pgcrypto',
       'postgis',
     ]);
@@ -92,7 +94,12 @@ describe('Migration’lar (boş veritabanı)', () => {
         )
       ).map((r: { valid: boolean }) => r.valid);
 
-    await revertLastMigration(ds);
+    // Index'i ekleyen migration'a kadar (o dahil) geri al; sonraki migration'lar da geri alınır.
+    const indexMigration = MIGRATIONS.indexOf(
+      OpenVisitIndexAndHotUpdates1727100000000,
+    );
+    for (let i = indexMigration; i < MIGRATIONS.length; i++)
+      await revertLastMigration(ds);
     expect(await valid()).toEqual([]);
 
     // Gerçek bir yarıda kalmış build: tekrarlanan veride UNIQUE CONCURRENTLY başarısız olur

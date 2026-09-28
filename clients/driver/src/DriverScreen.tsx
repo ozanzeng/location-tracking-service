@@ -4,6 +4,7 @@ import { AreasLayer } from '@shared/map/AreasLayer';
 import { BaseMap } from '@shared/map/BaseMap';
 import { Legend } from '@shared/zones/Legend';
 import { START_POSITION, START_SNAP_METERS } from './config';
+import type { LatLng } from './geo/latlng';
 import { ConnectionPanel } from './device/ConnectionPanel';
 import { DeviceLog } from './device/DeviceLog';
 import { useGpsSampler } from './device/useGpsSampler';
@@ -31,7 +32,9 @@ export function DriverScreen() {
   const [scooterId, setScooterId] = useScooterId();
   const [riding, setRiding] = useState(false);
   const [online, setOnline] = useState(true);
-  const [rideNotice, setRideNotice] = useState<string | null>(null);
+  // Uyarı verildiği konuma bağlı: scooter hareket edince (yeni konum) geçerliliğini yitirir.
+  // Efektle temizlemek oynatmada her adımda fazladan bir çizim demekti.
+  const [rideNotice, setRideNotice] = useState<{ text: string; at: LatLng } | null>(null);
   const [mode, setMode] = useState<MoveMode>(MoveMode.DRAG);
   const [speedKmh, setSpeedKmh] = useState(25);
 
@@ -49,9 +52,6 @@ export function DriverScreen() {
     if (snap) moveTo(snap.point);
   }, [roads, live, moveTo]);
 
-  // Scooter hareket edince "burada bitirilemez" uyarısı geçerliliğini yitirir.
-  useEffect(() => setRideNotice(null), [position]);
-
   const toggleRide = () => {
     if (!riding) {
       setRideNotice(null);
@@ -61,7 +61,7 @@ export function DriverScreen() {
       return;
     }
     const blocker = endRideBlocker(live.current, areas);
-    setRideNotice(blocker);
+    setRideNotice(blocker ? { text: blocker, at: position } : null);
     if (!blocker) setRiding(false);
   };
 
@@ -72,6 +72,7 @@ export function DriverScreen() {
   }, [live, moveTo, clearRoute]);
 
   const drawing = mode === MoveMode.ROUTE && !playback.playing && roads !== null;
+  const notice = rideNotice?.at === position ? rideNotice.text : null;
 
   return (
     <div className="view">
@@ -104,7 +105,7 @@ export function DriverScreen() {
       </div>
 
       <aside className="panel">
-        <RidePanel riding={riding} notice={rideNotice} onToggle={toggleRide} />
+        <RidePanel riding={riding} notice={notice} onToggle={toggleRide} />
         <MovementPanel
           mode={mode}
           onModeChange={setMode}

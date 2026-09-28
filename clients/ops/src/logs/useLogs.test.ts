@@ -11,9 +11,8 @@ vi.mock('@shared/api/client', () => ({
     logs: (query: LogQuery) => new Promise<Page>((resolve) => pending.push({ query, resolve })),
   },
 }));
-vi.mock('@shared/realtime/socket', () => ({
-  getSocket: () => ({ emit: vi.fn(), on: vi.fn(), off: vi.fn() }),
-}));
+const socket = vi.hoisted(() => ({ emit: vi.fn(), on: vi.fn(), off: vi.fn() }));
+vi.mock('@shared/realtime/socket', () => ({ getSocket: () => socket }));
 
 const { useLogs } = await import('./useLogs');
 
@@ -25,6 +24,14 @@ const respond = async (i: number, page: Page) => {
 describe('useLogs', () => {
   beforeEach(() => {
     pending.length = 0;
+    socket.emit.mockClear();
+  });
+
+  test('yalnızca olay odasına abone olur: tüm filonun konum yayınını (monitor) almaz', () => {
+    const { unmount } = renderHook(() => useLogs(EMPTY_FILTERS));
+    expect(socket.emit.mock.calls).toEqual([['subscribe', { events: true }]]);
+    unmount();
+    expect(socket.emit).toHaveBeenLastCalledWith('unsubscribe', { events: true });
   });
 
   test('eski filtrenin geç gelen yanıtı yeni filtrenin sonucunu ezmez', async () => {

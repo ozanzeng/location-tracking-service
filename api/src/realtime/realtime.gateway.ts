@@ -19,6 +19,7 @@ import { KeyScope } from '../security/key-scope.enum.js';
 import { PositionBuffer } from './position-buffer.js';
 import {
   isUserRoom,
+  EVENTS_ROOM,
   MONITOR_ROOM,
   userRoom,
   type GeofenceUpdateMessage,
@@ -28,11 +29,13 @@ import { RealtimeSubscriber } from './realtime.subscriber.js';
 
 interface SubscribePayload {
   monitor?: boolean;
+  events?: boolean;
   userId?: string;
 }
 
 /**
- * Socket.IO tarafı: istemciler odalara abone olur (operasyon: monitor, sürücü: kendi kullanıcısı).
+ * Socket.IO tarafı: istemciler odalara abone olur (operasyon: monitor ya da yalnızca olaylar için
+ * events, sürücü: kendi kullanıcısı).
  * Alan olayları anında gider; konumlar tamponlanıp belirli aralıklarla toplu gönderilir.
  */
 // CORS ayarı CorsIoAdapter'dan gelir (setup-app.ts).
@@ -85,15 +88,17 @@ export class RealtimeGateway
     @ConnectedSocket() client: Socket,
     @MessageBody() payload: SubscribePayload,
   ) {
-    // Tüm filonun canlı yayını tam yetki ister; sürücü anahtarı sadece kullanıcı odasına girer.
+    // Tüm filonun yayını (konumlar ya da yalnızca olaylar) tam yetki ister; sürücü anahtarı
+    // sadece kullanıcı odasına girer.
     const scope = (client.data as { scope?: KeyScope }).scope;
-    if (payload?.monitor && scope !== KeyScope.FULL) {
+    if ((payload?.monitor || payload?.events) && scope !== KeyScope.FULL) {
       return {
         ok: false,
-        error: 'monitor aboneliği tam yetkili anahtar ister',
+        error: 'filo aboneliği (monitor, events) tam yetkili anahtar ister',
       };
     }
     if (payload?.monitor) void client.join(MONITOR_ROOM);
+    if (payload?.events) void client.join(EVENTS_ROOM);
     if (
       typeof payload?.userId === 'string' &&
       payload.userId.length <= USER_ID_MAX_LENGTH
@@ -119,6 +124,7 @@ export class RealtimeGateway
     @MessageBody() payload: SubscribePayload,
   ) {
     if (payload?.monitor) void client.leave(MONITOR_ROOM);
+    if (payload?.events) void client.leave(EVENTS_ROOM);
     if (typeof payload?.userId === 'string') {
       void client.leave(userRoom(payload.userId));
     }
@@ -129,7 +135,7 @@ export class RealtimeGateway
     this.positions.add(message.position);
     for (const event of message.events) {
       this.server
-        .to([MONITOR_ROOM, userRoom(event.userId)])
+        .to([MONITOR_ROOM, EVENTS_ROOM, userRoom(event.userId)])
         .emit(RealtimeEvent.AREA_EVENT, event);
     }
   }

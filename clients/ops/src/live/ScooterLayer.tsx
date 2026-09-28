@@ -5,15 +5,24 @@ import { api } from '@shared/api/client';
 import type { AreaType, Position } from '@shared/api/types';
 import { SocketEvent } from '@shared/realtime/events';
 import { getSocket } from '@shared/realtime/socket';
-import { SCOOTER_ACTIVE_MS as ACTIVE_MS, SCOOTER_IDLE_MS as IDLE_MS, SCOOTER_REFRESH_MS } from '../config';
+import { SCOOTER_ACTIVE_MS as ACTIVE_MS, SCOOTER_REFRESH_MS } from '../config';
 import { scooterColor } from './scooterColor';
 import { countScooters, type Counts } from './scooterCounts';
+import { isNewerPosition, sameCounts, silence } from './scooterState';
 
 export interface Scooter {
   marker: L.CircleMarker;
   types: AreaType[];
+  /** Son görülme (canlı konumda geliş anı, açılış yüklemesinde ölçüm anı). */
   seenAt: number;
+  /** Gösterilen konumun cihazda ölçüldüğü an: eski konum yenisini ezmesin. */
+  recordedAt: number;
+  /** Soluk çizildi mi: her saniye yeniden boyanmasın. */
+  faded: boolean;
 }
+
+const LIVE_STYLE = { fillOpacity: 1, opacity: 1 };
+const FADED_STYLE = { fillOpacity: 0.35, opacity: 0.5 };
 
 /**
  * Scooter'ları Leaflet katmanında doğrudan günceller: yüzlerce konum saniyede birkaç kez
@@ -32,28 +41,39 @@ export function ScooterLayer({
     const layer = L.layerGroup().addTo(map);
     const all = scooters.current;
 
-    const upsert = (userId: string, lat: number, lng: number, types: AreaType[], seenAt = Date.now()) => {
+    const upsert = (p: Position, seenAt = Date.now()) => {
+      const types = p.areas.map((a) => a.type);
+      const recordedAt = Date.parse(p.recordedAt);
       const color = scooterColor(types);
-      const existing = all.get(userId);
+      const existing = all.get(p.userId);
       if (existing) {
-        existing.marker.setLatLng([lat, lng]).setStyle({ fillColor: color, fillOpacity: 1, opacity: 1 });
-        existing.types = types;
         existing.seenAt = Math.max(existing.seenAt, seenAt);
+        if (!isNewerPosition(existing.recordedAt, recordedAt)) return;
+        existing.marker.setLatLng([p.lat, p.lng]).setStyle({ fillColor: color, ...LIVE_STYLE });
+        existing.types = types;
+        existing.recordedAt = recordedAt;
+        existing.faded = false;
         return;
       }
-      const marker = L.circleMarker([lat, lng], {
+      const marker = L.circleMarker([p.lat, p.lng], {
         radius: 6,
         color: '#fff',
         weight: 2,
         fillColor: color,
-        fillOpacity: 1,
+        ...LIVE_STYLE,
       })
-        .bindTooltip(userId, { direction: 'top', offset: [0, -6] })
+        .bindTooltip(p.userId, { direction: 'top', offset: [0, -6] })
         .addTo(layer);
-      all.set(userId, { marker, types, seenAt });
+      all.set(p.userId, { marker, types, seenAt, recordedAt, faded: false });
     };
 
-    const publishCounts = () => onCounts(countScooters(all.values()));
+    let lastCounts: Counts | null = null;
+    const publishCounts = () => {
+      const counts = countScooters(all.values());
+      if (sameCounts(lastCounts, counts)) return;
+      lastCounts = counts;
+      onCounts(counts);
+    };
 
     let cancelled = false;
     // Açılışta sadece son 1 dakikada görülenler; "son görülme" konumun gerçek zamanı.
@@ -62,14 +82,7 @@ export function ScooterLayer({
         if (cancelled) return;
         for (const p of list) {
           const seenAt = Date.parse(p.recordedAt);
-          if (Date.now() - seenAt < ACTIVE_MS)
-            upsert(
-              p.userId,
-              p.lat,
-              p.lng,
-              p.areas.map((a) => a.type),
-              seenAt,
-            );
+          if (Date.now() - seenAt < ACTIVE_MS) upsert(p, seenAt);
         }
         publishCounts();
       },
@@ -79,13 +92,7 @@ export function ScooterLayer({
     const socket = getSocket();
     const join = () => socket.emit(SocketEvent.SUBSCRIBE, { monitor: true });
     const onPositions = (batch: Position[]) => {
-      for (const p of batch)
-        upsert(
-          p.userId,
-          p.lat,
-          p.lng,
-          p.areas.map((a) => a.type),
-        );
+      for (const p of batch) upsert(p);
     };
     join();
     socket.on(SocketEvent.CONNECT, join);
@@ -95,12 +102,13 @@ export function ScooterLayer({
     const timer = setInterval(() => {
       const now = Date.now();
       for (const [id, s] of all) {
-        const silent = now - s.seenAt;
-        if (silent > ACTIVE_MS) {
+        const state = silence(now, s.seenAt);
+        if (state === 'gone') {
           s.marker.remove();
           all.delete(id);
-        } else if (silent > IDLE_MS) {
-          s.marker.setStyle({ fillOpacity: 0.35, opacity: 0.5 });
+        } else if (state === 'idle' && !s.faded) {
+          s.marker.setStyle(FADED_STYLE);
+          s.faded = true;
         }
       }
       publishCounts();

@@ -43,7 +43,8 @@ export function useLogs(filters: LogFilters) {
 
   useEffect(() => {
     const socket = getSocket();
-    const join = () => socket.emit(SocketEvent.SUBSCRIBE, { monitor: true });
+    // Sadece giriş/çıkış olayları: tüm filonun konum yayını (monitor) bu ekranda gereksiz.
+    const join = () => socket.emit(SocketEvent.SUBSCRIBE, { events: true });
     const onEvent = (e: AreaEvent) => {
       if (e.eventType === EventType.ENTER) setNewEntries((n) => n + 1);
     };
@@ -53,7 +54,7 @@ export function useLogs(filters: LogFilters) {
     return () => {
       socket.off(SocketEvent.CONNECT, join);
       socket.off(SocketEvent.AREA_EVENT, onEvent);
-      socket.emit(SocketEvent.UNSUBSCRIBE, { monitor: true });
+      socket.emit(SocketEvent.UNSUBSCRIBE, { events: true });
     };
   }, []);
 

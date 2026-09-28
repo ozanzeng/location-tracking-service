@@ -4,6 +4,11 @@ import 'leaflet/dist/leaflet.css';
 import '@shared/styles/index.css';
 import './styles/driver.css';
 import { App } from './App';
+import { loadRoadNetwork } from './roads/loadRoads';
+
+// Yol ağı (~280 KB) ilk çizimi beklemeden inmeye başlasın; bileşen aynı isteği kullanır.
+// Hata burada yutulur: yükleme bileşende yeniden denenir ve hata orada gösterilir.
+loadRoadNetwork().catch(() => undefined);
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

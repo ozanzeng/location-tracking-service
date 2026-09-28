@@ -115,6 +115,69 @@ describe('Canlı yayın (e2e)', () => {
     expect(driverSaw).not.toContain('room-a');
   });
 
+  it('olay odası (events) tüm filonun alan olaylarını alır, konum yayınını almaz; tam yetki ister', async () => {
+    const connected = (socket: Socket) =>
+      new Promise<void>((resolve) => socket.on('connect', () => resolve()));
+    const driver = connect(DRIVER_KEY);
+    const logs = connect(KEY);
+    const monitor = connect(KEY);
+    await Promise.all([connected(driver), connected(logs), connected(monitor)]);
+    expect(await driver.emitWithAck('subscribe', { events: true })).toEqual({
+      ok: false,
+      error: expect.stringMatching(/tam yetkili/),
+    });
+    expect(await logs.emitWithAck('subscribe', { events: true })).toEqual({
+      ok: true,
+    });
+    await monitor.emitWithAck('subscribe', { monitor: true });
+
+    await request(app.getHttpServer())
+      .post('/areas')
+      .set('x-api-key', KEY)
+      .send({ name: 'Olay odası', type: 'PARKING', geometry: MODA_SQUARE })
+      .expect(201);
+    const logsGotPositions: unknown[] = [];
+    logs.on('positions', (batch: unknown) => logsGotPositions.push(batch));
+    const event = new Promise<{ userId: string; eventType: string }>(
+      (resolve) =>
+        logs.on(
+          'area-event',
+          (e: {
+            userId: string;
+            eventType: string;
+            area: { name: string };
+          }) => {
+            if (e.area.name === 'Olay odası') resolve(e);
+          },
+        ),
+    );
+    const monitorGotPositions = new Promise<void>((resolve) =>
+      monitor.once('positions', () => resolve()),
+    );
+
+    await request(app.getHttpServer())
+      .post('/locations')
+      .set('x-api-key', KEY)
+      .send({
+        userId: 'events-user',
+        ...INSIDE,
+        timestamp: new Date(Date.now() - 1000).toISOString(),
+      })
+      .expect(202);
+
+    expect(await event).toMatchObject({
+      userId: 'events-user',
+      eventType: 'ENTER',
+    });
+    // Toplu konum yayını monitor'e ulaştı. Sunucu olay odasına da göndermiş olsaydı, aynı
+    // soketteki sonraki cevaptan (ack) önce gelirdi: ack'ten sonra bakmak yarışsızdır.
+    await monitorGotPositions;
+    expect(await logs.emitWithAck('unsubscribe', { events: true })).toEqual({
+      ok: true,
+    });
+    expect(logsGotPositions).toEqual([]);
+  });
+
   it('yeni alan oluşturulunca bağlı istemcilere duyurur', async () => {
     const socket = connect(KEY);
     await new Promise<void>((resolve) => socket.on('connect', () => resolve()));

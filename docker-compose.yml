@@ -38,6 +38,9 @@ services:
       - max_connections=300
       - -c
       - shared_buffers=256MB
+      # Sorgu istatistikleri (pg_stat_statements): eklentiyi migration kurar.
+      - -c
+      - shared_preload_libraries=pg_stat_statements
       # synchronous_commit varsayılan (on): giriş kayıtları diske yazılınca onaylanır.
       # Giriş/çıkış olmayan konumlarda uygulama transaction içinde gevşetir (GeofenceService).
     ports:
@@ -135,7 +138,8 @@ services:
       - api
 
   k6:
-    image: grafana/k6:latest
+    # Sürüm sabit: k6 sürümü değişince sonuçlar ve özet biçimi değişebilir.
+    image: grafana/k6:2.3.0
     profiles: ["loadtest"]
     environment:
       BASE_URL: http://api:3000

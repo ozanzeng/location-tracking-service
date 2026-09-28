@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # k6'yı compose ağında çalıştırır, ardından kuyruğun ne zaman boşaldığını ölçer.
 # Kullanım: PEAK_RPS=2000 WORKERS=2 ./loadtest/run.sh
+#           MOVE=teleport ./loadtest/run.sh        (en kötü durum; eski ölçümlerle karşılaştırma)
+#           PROFILE=soak SOAK_RPS=500 SOAK_DURATION=30m ./loadtest/run.sh
 #
 # İki ayrı hız yazılır:
 # - Worker hızı (boşalma): yük bittiğinde kuyrukta kalan işler / boşalma süresi. Worker'lar
@@ -13,6 +15,8 @@ cd "$(dirname "$0")/.."
 
 WORKERS="${WORKERS:-2}"
 PEAK_RPS="${PEAK_RPS:-2000}"
+MOVE="${MOVE:-route}"
+PROFILE="${PROFILE:-load}"
 mkdir -p loadtest/results
 
 docker compose up -d --scale worker="$WORKERS" api worker >/dev/null
@@ -29,7 +33,9 @@ samples=loadtest/results/backlog.txt
 sampler=$!
 
 start=$(date +%s)
-docker compose --profile loadtest run --rm -e PEAK_RPS="$PEAK_RPS" k6 \
+docker compose --profile loadtest run --rm \
+  -e PEAK_RPS="$PEAK_RPS" -e MOVE="$MOVE" -e PROFILE="$PROFILE" \
+  -e SOAK_RPS="${SOAK_RPS:-500}" -e SOAK_DURATION="${SOAK_DURATION:-30m}" k6 \
   run --summary-export=/results/summary.json /scripts/locations.k6.js
 rc=$?
 ingest_end=$(date +%s)
@@ -46,10 +52,11 @@ drain_seconds=$(python3 -c "import time; print(max(time.time() - $drain_start, 0
 read -r accepted dropped <<<"$(python3 -c '
 import json
 m = json.load(open("loadtest/results/summary.json"))["metrics"]
-print(int(m["checks"]["passes"]), int(m.get("dropped_iterations", {}).get("count", 0)))')"
+print(int(m.get("accepted_locations", {}).get("count", 0)), int(m.get("dropped_iterations", {}).get("count", 0)))')"
 peak_backlog=$(sort -n "$samples" | tail -1)
 
 echo
+echo "Profil / hareket       : $PROFILE / $MOVE"
 echo "Worker sayısı          : $WORKERS"
 echo "Kabul edilen konum     : $accepted"
 echo "Düşen istek (k6)       : $dropped$([ "$dropped" -gt 0 ] && echo "  ← k6 hedef hıza ulaşamadı; koşular karşılaştırılamaz")"

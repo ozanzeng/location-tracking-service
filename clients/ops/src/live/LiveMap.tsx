@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import type L from 'leaflet';
 import { useAreas } from '@shared/hooks/useAreas';
 import { AreasLayer } from '@shared/map/AreasLayer';
@@ -21,12 +21,13 @@ export function LiveMap() {
   const feed = useEventFeed();
   const connected = useSocketConnected();
 
-  const focus = (userId: string) => {
+  // Sabit kimlik: olay akışı (memo) sayaçlar değişince yeniden çizilmesin.
+  const focus = useCallback((userId: string) => {
     const s = scooters.current.get(userId);
     if (!s || !mapRef.current) return;
     mapRef.current.flyTo(s.marker.getLatLng(), 17, { duration: 0.6 });
     s.marker.openTooltip();
-  };
+  }, []);
 
   return (
     <div className="view">
