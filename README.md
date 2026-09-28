@@ -2,7 +2,7 @@
 
 Mobil uygulamadaki kullanıcıların yaklaşık 5 saniyede bir gönderdiği konumları alır. Konumun tanımlı polygon alanlardan birine girip girmediğini tespit eder ve girişi kaydeder; kullanıcı alandan çıktığında aynı kayda çıkış zamanını da ekler. Trafik artışını karşılayacak şekilde tasarlandı: istekler kuyruğa alınır, ayrı worker süreçleri işler.
 
-Konumu gönderen "kullanıcı" bir scooter'dır ve filoya kayıtlı olmalıdır; kayıtsız kimlikten gelen konum kabul edilmez. Sürücüler kullanıcı adı ve şifreyle üye olup giriş yapar, boştaki bir scooter'ı kiralar; konumlar kiralanan scooter adına gider. Uzun süre konum göndermeyen scooter'ın açık girişleri son sinyal anıyla kapatılır ve kiralaması biter (bkz. "Scooterlar, sürücü hesapları ve kiralama").
+Konumu gönderen "kullanıcı" bir scooter'dır ve filoya kayıtlı olmalıdır; kayıtsız kimlikten gelen konum kabul edilmez. Sürücüler kullanıcı adı ve şifreyle üye olup giriş yapar, boştaki bir scooter'ı kiralar; konumlar kiralanan scooter adına gider. 30 saniye konum göndermeyen scooter'ın açık girişleri "sinyal kesildi" olarak kapatılır (bkz. "Sinyal kaybı"); 10 dakika göndermezse kiralaması da biter ve scooter boşa çıkar (bkz. "Sessiz kiralama").
 
 Yanında servisle veri alışverişi yapan iki istemci de var (case kapsamı dışında, demo için):
 - **Sürücü uygulaması:** Giriş/üyelik, boştaki scooter'ı seçme (hepsi doluysa "Boşta scooter yok"), sürüş. Gerçek bir cihaz gibi 5 saniyede bir konum gönderir; bir bölgeye girip çıkınca beklemeden gönderir. Çevrimdışıyken konumları biriktirir, bağlanınca toplu yollar.
@@ -112,16 +112,19 @@ curl -H "$H" 'localhost:3000/logs?userId=scooter-01'
 {
   "data": [
     { "id": "2", "userId": "scooter-01", "areaId": "…", "areaName": "Moda Sahil", "areaType": "NO_RIDE",
-      "entryTime": "2026-09-26T10:00:00.000Z", "exitTime": null, "exitReason": null }
+      "entryTime": "2026-09-26T10:00:00.000Z", "exitTime": null,
+      "exitReason": null, "lastSeenAt": "2026-09-26T10:04:55.120Z" }
   ],
   "nextCursor": null
 }
 ```
 
-`exitReason` normal çıkışta (alan dışından konum geldi) `null`. Diğer değerler:
-- `SIGNAL_LOST`: scooter uzun süre konum göndermedi, kayıt son sinyal anıyla kapatıldı (gerçek çıkış bundan sonra olabilir).
-- `AREA_CHANGED`: alanın şekli değişti ve scooter'ın son konumu yeni şeklin dışında kaldı.
-- `AREA_REMOVED`: alan silindi.
+- `exitReason`: açık girişte `null`. Kapanmış girişte:
+  - `LEFT`: scooter alandan çıktı (alan dışından konum geldi).
+  - `SIGNAL_LOST`: konumu 30 saniye gelmediği için kapatıldı, `exitTime` kapatıldığı an (bkz. "Sinyal kaybı"). Gerçek çıkış bundan sonra olabilir.
+  - `AREA_CHANGED`: alanın şekli değişti ve scooter'ın son konumu yeni şeklin dışında kaldı.
+  - `AREA_REMOVED`: alan silindi.
+- `lastSeenAt`: açık girişte servisin scooter'dan son konumu aldığı an. Eskiyse scooter konum göndermiyordur; "içeride" bilinen son durumdur. Kapanmış girişte `null`.
 
 Sürücü akışı:
 
@@ -147,13 +150,14 @@ curl -X POST localhost:3000/rentals/current/end -H "$B"
 ## Varsayımlar
 
 - **Timestamp cihaz saatidir.** Giriş zamanı olarak sunucunun isteği aldığı an değil, konumun ölçüldüğü an kaydedilir. Cihaz saati sunucudan en fazla 60 saniye ileride olabilir.
+- **Konumu gelmeyen kullanıcı süresiz "içeride" kalmaz.** 30 saniye konum göndermeyen kullanıcının açık girişleri, kapatıldığı anın saatiyle "sinyal kesildi" olarak kapatılır (bkz. "Sinyal kaybı"). Case çıkışı tanımlamıyor; bu bir genişletme.
 - **Eski konumlar atlanır.** Bir kullanıcının son işlenen konumundan daha eski bir konum gelirse, örneğin ağda gecikmişse, durumu geriye götürmesin diye yok sayılır.
 - **Alanlar çakışabilir.** Bir konum birden fazla alanın içindeyse her alan için ayrı giriş kaydı açılır.
 - **Polygon delikleri desteklenir.** GeoJSON'daki iç halkalar (hole) alanın dışı sayılır. Tam sınır çizgisi üzerindeki nokta içeride sayılmaz (`ST_Contains`); gerçek GPS verisinde bunun pratik bir etkisi yok.
 - **`userId` bir scooter kimliğidir ve kayıtlı olmalıdır.** Konumu gönderen cihaz scooter'dır; sürücü değişse de kayıtlar scooter'a göre tutulur (hangi alanda hangi scooter vardı). Kayıtsız kimlikten gelen konum `400` alır. Sürücü uygulaması kimliği gövdede gönderir ama sunucu onu oturumdaki kiralamayla karşılaştırır; güvenilen servis (API anahtarı) kayıtlı her scooter için gönderebilir, park halindeki scooter'ın kendi cihazı gibi.
 - **Kiralanmamış scooter da konum gönderebilir.** Gerçek filoda scooter park halindeyken de konumunu bildirir; bu yol sadece API anahtarıyla açık.
 - **Scooter durumu elle girilmez.** Boşta ya da kullanımda olması aktif kiralamadan hesaplanır. "Bakımda" gibi elle verilen bir durum şimdilik yok (bkz. kapsam dışı).
-- **Sessizlik sinyal kaybıdır.** Cihaz 5 sn'de bir gönderir; 10 dakika (`SIGNAL_LOSS_TIMEOUT_MS`) hiç konum gelmezse scooter'ın izi kaybedilmiş sayılır: açık girişleri son sinyal anıyla kapatılır, kiralaması biter.
+- **Unutulan kiralama biter.** 10 dakika (`RENTAL_IDLE_TIMEOUT_MS`) hiç konum gelmeyen kiralama son sinyal anıyla biter, scooter başka sürücülere açılır. Girişleri kapatan 30 saniyeden uzun tutuldu: tünelde ya da kısa bir ağ kopmasında sürücü scooter'ını kaybetmesin.
 - **Alanlar az sayıdadır ve seyrek değişir.** Binler mertebesinde olması beklenir, bu yüzden `GET /areas` sayfalanmaz. Log tablosu ise hızla büyüyeceği için sayfalanır.
 - **Alan geçmişi silinmez.** Silinen alanın giriş kayıtları denetim ve raporlama için kalır; alan sadece listeden ve konum işlemeden çıkar.
 - **ORM kullanımı:** Alan kaydı ve okuma TypeORM repository ile yapılır. Konum işleme ve log sorguları ise performans için TypeORM üzerinden ham SQL ile yazıldı; tek sorguda okuma, CTE ile tek sorguda yazma ve keyset sayfalama ORM sorgu kurucusuyla ifade edilemiyor.
@@ -172,6 +176,18 @@ curl -X POST localhost:3000/rentals/current/end -H "$B"
 4. Fark hesaplanır. Yeni girişler, çıkışlar ve son konum **tek bir CTE sorgusuyla** yazılır.
 
 `test/geofence.e2e-spec.ts` testi aynı konumun 50 kopyasını servis seviyesinde paralel işler ve tam 1 giriş beklendiğini doğrular. Kilit kaldırıldığında test kırmızıya düşüyor: 50 kopyanın 20'si ayrı ayrı işlendi ve mükerrer log oluştu. Yani test gerçek bir hatayı yakalıyor.
+
+**Sinyal kaybı.** Giriş, kullanıcının alan dışındaki konumu gelince kapanır. Konum göndermeyi bırakan kullanıcının (uygulama kapandı, pil bitti, sürüş bitti) girişi bu yüzden süresiz açık kalıyor ve kayıtlarda sonsuza dek "İçeride" görünüyordu (dev veritabanında 21 kayıt, hepsinin son konumu 1 saatten eski). İki katmanlı çözüm:
+- **Veri:** Worker 5 saniyede bir (`SIGNAL_LOSS_SWEEP_MS`), 30 saniyedir (`SIGNAL_LOSS_TIMEOUT_MS`, 0 kapatır) konumu gelmeyen kullanıcıların açık girişlerini kapatır: `exitTime` girişin kapatıldığı an olur, kayıt `SIGNAL_LOST` olarak işaretlenir ve kullanıcının alanla ilişkisi biter (artık "içeride" sayılmaz). Cihazlar 5 saniyede bir gönderdiği için 30 saniye, art arda 6 konumun gelmemesi demek. Ekranda "sinyal kesildi" diye görünür; olay akışında çıkış sayılmaz.
+- **Görüntü:** `GET /logs` açık girişlerde kullanıcının son konumunun alındığı anı (`lastSeenAt`) döner. Operasyon ekranı 15 saniyedir konumu gelmeyen açık girişi (canlı haritada soluklaştığı süre) liste yenilenene kadar "İçeride" yerine "Sinyal yok · 20 sn önce" gösterir.
+
+Tasarım ayrıntıları:
+- **Ölçüt "konum göndermemek", "hareket etmemek" değil.** Işıkta bekleyen ya da sürüş sürerken park etmiş scooter konum göndermeye devam eder ve gerçekten içeridedir.
+- **Sessizlik sunucu saatiyle ölçülür** (`user_last_location.seen_at`, konum işlenince güncellenir). Cihaz saatiyle (`recorded_at`) ölçülseydi, saati geride olan bir cihaz sürekli konum gönderirken bile sessiz sayılır, girişi her dakika kapanıp yeniden açılırdı.
+- **Kuyrukta bekleyen konum sessizlik sayılmaz.** Yük altında konumlar kuyrukta bekleyebilir (yük testinde en fazla ~40 bin iş birikti). Arama, işlenmeyi bekleyen en eski işin yaşı kadar ek pay bırakır: kuyrukta 20 sn bekleyen iş varsa yalnızca 50 sn'den uzun sessiz kalanlar kapanır. Böylece konumu kuyrukta bekleyen aktif kullanıcının girişi kapanıp yeniden açılmaz.
+- **Yarış yok.** Her kullanıcı, konum işlemeyle aynı kullanıcı kilidi altında kapatılır ve sessizlik kilit altında yeniden kontrol edilir; tam o sırada işlenen bir konum girişi kapattırmaz. Her worker arar; aynı kullanıcıyı ikinci kez kapatacak açık giriş kalmaz. Aramalar 500 kullanıcılık gruplarla, kullanıcı başına kısa transaction'larla yapılır.
+- **Bedeli:** Sürüş sadece park alanında bitebiliyor ve bitince uygulama konum göndermeyi bırakıyor; park edilen scooter 30 saniye sonra "sinyal kesildi" olarak kapanır (kayıt bunu "çıktı" değil "sinyal kesildi" diye söyler). Scooter yeniden konum gönderirse yeni bir giriş açılır. Sürücü uygulaması 30 saniyeden uzun çevrimdışı kalıp birikmiş konumlarını sonra gönderirse, bu konumlar yeni bir giriş açar ve girişin zamanı (cihazda ölçüldüğü an) önceki kaydın çıkış zamanından (kapatıldığı an) önce olabilir. Çıkış zamanı cihaz saatiyle ileride olan girişten önce yazılmaz.
+- **Canlı yayın bağlantıları ayrı konu.** Ping'e 30 saniye cevap vermeyen Socket.IO bağlantısı zaten kapatılıyor (bkz. Güvenlik); ama konumlar HTTP ile geldiği için bu "içeride" durumunu etkilemez.
 
 **İleri tarihli konumlar reddedilir.** `timestamp` sunucu saatinden 60 saniyeden fazla ilerideyse istek `400` alır. Aksi halde bu konum, sonraki gerçek konumların "eski" sayılıp atlanmasına yol açardı.
 
@@ -218,15 +234,15 @@ Bir iş başarısız sayılmadan önce 3 kez takılabilir (`WORKER_MAX_STALLED_C
 - `scooters`: `id` (konumlardaki `userId`), `name`, `deleted_at`. Kurulumda 5 scooter gelir. Silme yumuşaktır: silinen scooter konum gönderemez ve kiralanamaz, ama giriş kayıtları ve kiralama geçmişi kalır; aynı kimlikle tekrar eklenince geri gelir.
 - `riders`: `username` (küçük harfle, benzersiz), `password_hash` (Argon2id).
 - `rentals`: `scooter_id`, `rider_id`, `started_at`, `ended_at`, `end_reason` (`RETURNED` ya da `SIGNAL_LOST`). İki kısmi unique index: bir scooter'ın ve bir sürücünün en fazla bir açık kiralaması olabilir. İki sürücü aynı scooter'a aynı anda basarsa veritabanı birini reddeder (`409`); e2e testi 5 sürücüyü aynı scooter'a aynı anda gönderir ve sadece birinin aldığını doğrular.
+- `area_logs.exit_reason`: alan dışından konum gelmeden kapanan girişin sebebi (`SIGNAL_LOST`, `AREA_CHANGED`, `AREA_REMOVED`); normal çıkışta `NULL`, API'de `LEFT`. Sinyal kaybı ilk olarak ayrı bir `signal_lost` kolonuyla geldi; migration `UnifyExitReason` işaretli kayıtları bu kolona taşıyıp eskisini kaldırır, böylece çıkış sebebi tek yerde tutulur.
 - Kiralama ile silme yarışmaz: kiralama scooter satırını `FOR SHARE`, silme `FOR UPDATE` ile kilitler. Silme kiralamadan önce biterse kiralama scooter'ı silinmiş bulur (`404`), sonra biterse kiralamayı görür (`409`).
 
 **Konum kabulü veritabanına gitmez.** Kayıtlı scooter listesi her API instance'ının belleğindedir (`ScooterRegistry`): açılışta yüklenir, scooter eklenince ya da silinince Redis üzerinden duyuruyla (`<önek>:fleet`) tüm instance'larda yenilenir, duyuru kaçarsa dakikada bir. Veritabanı sonradan erişilemezse bilinen son liste kullanılır; açılışta hiç yüklenemediyse konumlar `503` alır (kayıtsız kimlik kabul etmektense beklemek). Sürücünün kiraladığı scooter Redis'te 30 sn önbelleklidir; kiralama başlarken ve biterken hemen güncellenir. Böylece API'nin "konumu veritabanına dokunmadan kabul et" özelliği korunur.
 
-**Sinyal kaybı.** Worker 30 sn'de bir (`SIGNAL_LOSS_CHECK_MS`) 10 dakikadır (`SIGNAL_LOSS_TIMEOUT_MS`) konum göndermeyen scooter'ları arar (`api/src/geofence/signal-loss.sweeper.ts`):
-- Açık giriş kayıtları son sinyal anıyla kapatılır ve `exit_reason = SIGNAL_LOST` ile işaretlenir. Önceden pili biten ya da uygulaması kapanan cihaz sonsuza kadar "içeride" görünüyordu: bir yük testinden sonra 3.515 açık kaydın 3.509'u 20 dakikadır sessiz scooter'lara aitti. Yeni sürüm açılınca ilk tur hepsini kapattı.
-- Aktif kiralama son sinyal anıyla (hiç konum yoksa başlangıç anıyla) biter; scooter başka sürücülere açılır. Sürüşü bitirmeden uygulamayı kapatan sürücü scooter'ı kilitli bırakamaz.
-- Kullanıcı kilidi (konum işlemeyle aynı advisory lock) denenir, beklenmez: o an konumu işlenen ya da başka worker'ın kapattığı scooter atlanır. Her worker tarar, lider seçimi gerekmez; bir kayıt bir kez kapanır. Birikmiş iş 500'lük gruplarla aynı turda erir.
-- Cihaz geri dönerse ya da çevrimdışı biriken konumları sonradan gelirse içindeki alanlar için yeni giriş açılır; aradaki boşluğun sinyal kaybı olduğu kapanan kaydın işaretinden anlaşılır. Kiralama bittiği için sürücünün bu konumları `409` alır; uygulama kiralamanın bittiğini söyleyip seçim ekranına döner.
+**Sessiz kiralama.** Worker, 10 dakikadır (`RENTAL_IDLE_TIMEOUT_MS`, 0 kapatır) konum göndermeyen kiralanmış scooter'ları arar (`api/src/fleet/idle-rental.sweeper.ts`, giriş kayıtlarının sinyal kaybı taramasıyla aynı aralıkta):
+- Aktif kiralama son sinyal anıyla (hiç konum yoksa başlangıç anıyla) `SIGNAL_LOST` sebebiyle biter; scooter başka sürücülere açılır. Sürüşü bitirmeden uygulamayı kapatan sürücü scooter'ı kilitli bırakamaz.
+- Sessizlik giriş kayıtlarındaki gibi sunucu saatiyle (`seen_at`) ölçülür ve kuyrukta bekleyen en eski işin yaşı kadar pay bırakılır. Tek `UPDATE ... WHERE ended_at IS NULL` ile bittiği için iki worker aynı kiralamayı iki kez bitiremez.
+- Kiralama önbelleği silinir ve filo duyurusu gider: sürücünün sonraki konumları `409` alır, uygulama kiralamanın bittiğini söyleyip seçim ekranına döner; operasyon ekranındaki filo listesi yenilenir.
 
 **Alan düzenleme ve silme.** Giriş kayıtları hep bir konumdan doğar; alan değişince kayıtların tutarlı kalması için (migration `AreaEdits`, `api/src/areas/areas.service.ts`):
 - **Ad ya da tip değişince** kayıtlara dokunulmaz: kayıtlar alana okunurken bağlanır, eski girişler de yeni adla görünür.
@@ -295,7 +311,7 @@ Tasarım kararları, 3 milyon giriş kaydı ve 50 bin kullanıcılı ayrı bir b
 
 - **Metrikler (Prometheus):**
   - API'de: HTTP istek süresi (rota şablonu, method, durum kodu), kabul edilen ve reddedilen konumlar (`reason`: rate_limited / backpressure), kuyruk derinliği (tüm şeritler) ve en dolu şeridin derinliği.
-  - Worker'da: işleme süresi, kuyrukta bekleme süresi (`location_job_lag_seconds`), alan giriş ve çıkış sayıları, denemeleri tükenen işler, sinyal kaybıyla kapatılan girişler ve biten kiralamalar (`signal_loss_total{kind="visit"|"rental"}`). Birden çok scooter'ın aynı anda sinyal kaybetmesi (ör. hücresel kesinti) bu metrikte sıçrama olarak görünür.
+  - Worker'da: işleme süresi, kuyrukta bekleme süresi (`location_job_lag_seconds`), alan giriş ve çıkış sayıları, sinyali kesildiği için kapatılan girişler (`area_visits_signal_lost_total`), sessiz kaldığı için biten kiralamalar (`rentals_ended_idle_total`), denemeleri tükenen işler. Birden çok scooter'ın aynı anda sinyal kaybetmesi (ör. hücresel kesinti) bu metriklerde sıçrama olarak görünür.
   - Her ikisinde de Node süreç metrikleri.
   - Worker'ın HTTP API'si olmadığı için metrikleri ayrı bir portta (`WORKER_METRICS_PORT`, varsayılan 9100) yayınlanır.
 - **Sorgu istatistikleri:** `pg_stat_statements` açık (compose'da `shared_preload_libraries`, eklentiyi migration kurar). Yük testinden sonra hangi sorgunun toplamda ne kadar zaman harcadığı `SELECT calls, total_exec_time, query FROM pg_stat_statements ORDER BY total_exec_time DESC LIMIT 10` ile görülür. Eklenti "trusted" olmadığı için yönetilen bir veritabanında migration kullanıcısı superuser değilse bu adım atlanır; orada sağlayıcının ayarından açılır.
@@ -378,9 +394,9 @@ docker compose up -d --build
 
 | | Birim | E2E | Smoke (veri yazmaz*) |
 |---|---|---|---|
-| **Backend** | 178 test · `api: npm test` | 107 test · `api: npm run test:e2e` | `api: npm run smoke` |
-| **Veritabanı** | 46 test · `api: npm run test:db` | (backend e2e içinde) | `api: npm run smoke:db` |
-| **Frontend** | 107 test · `clients: npm run test:unit` | 23 tarayıcı testi · `clients: npm run test:ui` | `clients: npm run smoke` |
+| **Backend** | 183 test · `api: npm test` | 108 test · `api: npm run test:e2e` | `api: npm run smoke` |
+| **Veritabanı** | 54 test · `api: npm run test:db` | (backend e2e içinde) | `api: npm run smoke:db` |
+| **Frontend** | 117 test · `clients: npm run test:unit` | 23 tarayıcı testi · `clients: npm run test:ui` | `clients: npm run smoke` |
 
 \* Backend smoke testi, gerçek akışı denemek için tek bir sabit test alanı ve her koşuda benzersiz bir test scooter'ı kullanır; scooter'ı koşu başında filoya ekler, sonunda çıkarır (yumuşak silme).
 
@@ -404,8 +420,9 @@ Statik kontroller: `api: npm run lint && npm run typecheck` (testler dahil tam t
 
 **Veritabanı** (gerçek PostGIS):
 - **Migration'lar:** boş bir veritabanında hepsi uygulanır, tamamen geri alınır ve tekrar uygulanır. Migration bağlantısında sorgu süresi sınırsız, kilit beklemesi sınırlıdır: kilitli bir tabloda transaction dışındaki bir adım da beklemeden hata verir. Bu test, `CONCURRENTLY` index'li migration'ın geri alınamadığı bir hatayı yakaladı. Yarıda kalmış bir build'in bıraktığı INVALID index, migration tekrar çalışınca yeniden oluşturulur.
-- **Kısıtlar:** Uygulama hata yapsa bile veritabanı şunları reddeder: geçersiz poligon, yanlış geometri tipi, bilinmeyen alan tipi, çıkışın girişten önce olması, aynı alanda iki açık giriş, var olmayan alana giriş, açık girişte sinyal kaybı işareti; aynı scooter'ın ya da aynı sürücünün iki açık kiralaması, bitiş sebebi olmadan biten kiralama, var olmayan scooter'ın kiralanması, büyük harfli ya da boşluklu kullanıcı adı, aynı kullanıcı adı iki kez. Alan silinince kayıtları da silinir.
-- **Sorgu planı regresyonları (200 bin kayıtla):** kritik sorgular beklenen index'i kullanır, son konum güncellemeleri %95'ten fazla HOT'tur, `area_logs` temizlik eşikleri yerindedir, `pg_stat_statements` sorguları kaydeder (sorgu kimliğiyle aranır: takma adlar kimliğe girmediği için metinle aramak testlerin çalışma sırasına göre kırmızıya düşüyordu), `statement_timeout` uzun sorguyu keser.
+- **Kısıtlar:** Uygulama hata yapsa bile veritabanı şunları reddeder: geçersiz poligon, yanlış geometri tipi, bilinmeyen alan tipi, çıkışın girişten önce olması, aynı alanda iki açık giriş, var olmayan alana giriş, açık girişte çıkış sebebi (`SIGNAL_LOST`, `AREA_CHANGED`, `AREA_REMOVED`); aynı scooter'ın ya da aynı sürücünün iki açık kiralaması, bitiş sebebi olmadan biten kiralama, var olmayan scooter'ın kiralanması, büyük harfli ya da boşluklu kullanıcı adı, aynı kullanıcı adı iki kez. Alan silinince kayıtları da silinir.
+- **Sorgu planı regresyonları (200 bin kayıtla):** kritik sorgular beklenen index'i kullanır, son konum güncellemeleri %95'ten fazla HOT'tur, `area_logs` temizlik eşikleri yerindedir, `pg_stat_statements` sorguları kaydeder (sorgu kimliğiyle aranır: takma adlar kimliğe girmediği için metinle aramak testlerin çalışma sırasına göre kırmızıya düşüyordu), sinyal kaybı araması tüm tabloyu değil açık girişlerin index'ini tarar, `statement_timeout` uzun sorguyu keser.
+- **Sinyal kaybı:** yalnızca 30 saniyedir konumu gelmeyen scooter'ın açık girişi kapanır; çıkış zamanı kapatıldığı andır (cihaz saati ileride olan girişten önce değil). Saati 2 saat geride olan ama konum gönderen cihaz, kapanmış girişler, 25 saniyelik sessizlik ve konumu kuyrukta bekleyen scooter dokunulmadan kalır. Tam o sırada işlenen konum girişi kapattırmaz (kullanıcı kilidi; kilit kaldırılınca test kırmızı). 1.200 scooter gruplar hâlinde kapanır. Kapanan scooter yeniden görülünce yeni giriş açılır; konum işlenince sunucu zamanı güncellenir.
 - **Son konumlar (`GET /locations/latest`):** zaman penceresi, en yeniden eskiye sıra (aynı saniyede kimliğe göre), limit, içinde bulunulan alanlar (kapanmış giriş sayılmaz).
 - **Uygulama rolü:** API'nin gerçek yazma yolu en az yetkili rolle çalışır; üyelik, kiralama (satır kilidiyle), bitirme, scooter ekleme ve yumuşak silme, alan düzenleme ve yumuşak silme, sinyal kaybı güncellemesi, şifre özetinin yenilenmesi yapılabilir; silme (alan, scooter, kiralama, sürücü), kullanıcı adı değiştirme, boşaltma, şema değiştirme ve `COPY ... TO PROGRAM` reddedilir. Şifre `pg_stat_statements`'a düşmez; gönderilen SCRAM doğrulayıcısı Postgres'in aynı şifreden ürettiğiyle birebir aynıdır (Türkçe karakterli şifre dahil). Migration'lar kullanılmayan eklenti bırakmaz.
 - **Veritabanı smoke:** bağlantı, PostGIS, bekleyen migration, gerekli ve geçerli (INVALID olmayan) index'ler (tek açık kiralama ve benzersiz kullanıcı adı garantisini sağlayanlar ile kiralama geçmişi index'i dahil), HOT ayarı, zaman aşımları, `synchronous_commit`.
@@ -417,17 +434,18 @@ Statik kontroller: `api: npm run lint && npm run typecheck` (testler dahil tam t
 - Kullanıcı şeritleri (gerçek Redis): iki worker aynı şeridi dinlerken işlerin üst üste binmemesi ve geliş sırası; denemeleri tükenen işin şeridi tıkamaması; çöken worker'ın işinin sırası bozulmadan diğer worker'a geçmesi; şerit sayısı uyuşmazlığı.
 - Birikmiş kuyrukta aynı kullanıcının işlerinin uçtan uca sırayla işlenmesi; şeritlerden önceki kuyrukta kalmış eski biçimdeki işler.
 - İki kez takılan (donan worker'larda kalan) işin kaybolmayıp sonraki worker'da işlenmesi.
+- Sinyal kaybı (gerçek worker, kısa süreler): sessiz kalan kullanıcının girişi `SIGNAL_LOST` olarak kapanır, saati geride olsa da konum gönderen kullanıcınınki açık kalır, yeniden görülen kullanıcı için yeni giriş açılır, çıkış zamanı kapatıldığı an; `GET /logs`'ta `exitReason` ve `lastSeenAt`; kuyrukta bekleyen en eski işin yaşı (gerçek Redis). Diğer e2e testlerinde arama kapalıdır (30 sn'den uzun süren dosyada açık girişler kendiliğinden kapanmasın).
 - Kapanış sırasında sürekli gelen isteklerin hiçbirinin `500` almaması; `500` yerine `400`: çözülemeyen zaman damgaları, geçersiz imleç, bozuk JSON; `413`: gövde sınırı; 10 bin köşeli polygon kabul, fazlası açıklamalı `400`.
 - **Sürücüler, filo ve kiralama** (gerçek scooter listesiyle): üyelik (küçük harfe çevirme, aynı ad, geçersiz ad/şifre), giriş (yanlış şifre ile olmayan kullanıcının aynı yanıtı, 3 başarısız denemeden sonra doğru şifreye de `429`, ilk sürümün scrypt özetiyle girişte özetin Argon2id'ye yenilenmesi), çıkıştan sonra token'ın geçersizliği; kurulumdaki 5 scooter, ekleme, silme, aynı kimlikle geri ekleme, kullanımdaki scooter'ın silinememesi, sürücünün ve operasyonun farklı görünümü; kiralanan scooter'ın başkasına verilmemesi, sürücü başına tek scooter, 5 sürücü aynı anda aynı scooter'a basınca tek kiralama, 5'i de doluyken boşta scooter kalmaması, silinmiş scooter'ın kiralanamaması; kayıtsız scooter'ın reddi, eklenen scooter'ın hemen gönderebilmesi, silinenin hemen gönderememesi, sürücünün kiralamasız, başkasının scooter'ı için ve sürüş bittikten sonra gönderememesi.
 - **Alan düzenleme ve silme:** ad ve tip değişince kayıtların yeni adla görünmesi ve açık kalması; şekil küçülünce sadece dışarıda kalan scooter'ın girişinin kapanması (`AREA_CHANGED`), yeni şeklin konum işlemede hemen geçerli olması; silinen alanın listeden kalkması, girişlerinin kapanması (`AREA_REMOVED`), geçmişin kalması, yeni giriş açılmaması; boş düzenleme, geçersiz poligon ve kimlikte `400`, silinmiş alanda `404`; sürücü oturumunun alan düzenleyip silememesi.
 - **Scooter detayı:** durum, kimde, son konum, içinde bulunduğu alan, kiralamalar ve cihaz günlüğü (işlenen ve eski olduğu için atlanan konum, giriş olayı, istek kimliği); filodan çıkarılmış scooter'ın detayının açılması, hiç izi olmayan kimliğe `404`, sürücü oturumuna `403`.
-- **Sinyal kaybı:** sessiz scooter'ın açık girişinin son sinyal anıyla kapanması ve işaretlenmesi; süre dolmadan dokunulmaması; cihaz dönünce yeni giriş; iki eşzamanlı taramada tek kapanış; unutulan kiralamanın son sinyal anıyla (hiç konum yoksa başlangıçtan itibaren) bitmesi ve scooter'ın boşa çıkması.
+- **Sessiz kiralama:** konum gönderen kiralamaya dokunulmaması; sessiz kalan kiralamanın son sinyal anıyla bitmesi, scooter'ın boşa çıkması ve sürücünün artık gönderememesi; hiç konum göndermeyen kiralamanın başlangıcından itibaren sayılması; iki eşzamanlı taramada tek bitiş.
 - API anahtarı ve sürücü oturumunun sınırları (HTTP ve WebSocket; sürücünün sadece kiraladığı scooter'ın odasına girmesi, geçersiz token'lı bağlantının kapanması, kiralamanın bağlı istemcilere duyurulması), rate limit (sınırdan büyük toplu istek, reddin kotadan düşmemesi, toplu istekte bir kullanıcı sınırdaysa diğerlerinin sayacına dokunulmaması; testler dakikalık pencerenin sonuna denk gelmesin diye pencerede en az 10 sn kalınca başlar), `503` backpressure, metrikler, canlı yayın ve alan duyurusu, olay odasının (`events`) konum yayını almaması ve tam yetki istemesi, ping'e cevap vermeyen bağlantının kapatılması.
 
 **Frontend birim** (Vitest, hook'lar için jsdom):
 - **Konum ölçümü (`useGpsSampler`):** 5 saniyede bir ölçüm; alana girince ve çıkınca beklemeden ölçüm, ardından düzenli ölçümün oradan devam etmesi; aynı alanlar içinde hareketin ve yeni tanımlanan alanın ek ölçüm yapmaması; sınırda gidip gelince saniyede en fazla bir ölçüm; sürüklerken (bırakmadan) sınır geçişi; bağlantı durumu değişince ölçümün baştan başlamaması.
 - **Gönderim kuyruğu (`useOutbox`):** kaydedilen konumun zamanlayıcıyı beklemeden gönderilmesi, çevrimdışı birikim ve tek toplu istek, 100'lük gruplar, `429`'da `Retry-After` kadar bekleme, ağ hatasında noktaları kaybetmeme, `401`'de oturumun düştüğünü bildirme, `403`/`409`'da (kiralama bitmiş) noktaları atıp kiralamayı kontrol ettirme, bırakırken bekleyen konumların gönderilmesini bekleme. Toplu istek tek hatalı nokta yüzünden `400` alırsa grup ikiye bölünür; sadece o nokta atılır. Ardışık hatalı noktalar (ör. saati ileri cihaz) baştan bölme yapılmadan, her biri tek istekle atılır. Gönderim sürerken kuyruk dolup baştan kırpılsa bile gönderilmemiş noktalar silinmez.
-- **Giriş kayıtları (`useLogs`, `LogsView`):** eski filtrenin geç gelen yanıtı ya da önceki sonraki-sayfa isteği yeni sonucu ezmez; ekran yalnızca olay odasına abone olur; kolon "Scooter", filtre kayıtlı scooterları listeler; filtre değişince ve detay paneli açılınca tablo yeniden çizilmez; satırdaki scooter'a tıklayınca panel ve cihaz günlüğü açılır, panelden filtrelenir, Esc kapatır.
+- **Giriş kayıtları (`useLogs`, `LogsView`, `LogsTable`):** eski filtrenin geç gelen yanıtı ya da önceki sonraki-sayfa isteği yeni sonucu ezmez; ekran yalnızca olay odasına abone olur; kolon "Scooter", filtre kayıtlı scooterları listeler; filtre değişince ve detay paneli açılınca tablo yeniden çizilmez; satırdaki scooter'a tıklayınca panel ve cihaz günlüğü açılır, panelden filtrelenir, Esc kapatır. 15 sn'dir konumu gelmeyen açık giriş "Sinyal yok · X önce", sunucunun kapattığı giriş "sinyal kesildi" notuyla görünür, zaman geçtikçe güncellenir; alan değişikliğiyle kapanan giriş "alan değişti" / "alan silindi" notu alır. Sinyali kesilen giriş olay akışında çıkış sayılmaz.
 - **Canlı harita:** geç gelen ilk yükleme canlı konumun üstüne yazmaz; soluklaşma ve düşme eşikleri; sayaçlar değişmedikçe yayınlanmaz.
 - **Levhalar (`useRiderEvents`):** ekran kapanınca bekleyen levha zamanlayıcısı kalmaz; scooter değişince öncekinin levhaları ve bölgeleri ekranda kalmaz.
 - **Alan listesi (`useAreas`):** süren bir liste isteği yeni alan kaydedilmeden başlamış olabilir; duyurulan ya da kaydedilen alan sonuçta yoksa bir kez daha istenir (aynı anda gelen yenilemeler tek ek istekte birleşir), varsa istek atılmaz.
@@ -497,9 +515,9 @@ Sürücü ──konum──▶ API ──kuyruk──▶ Worker ──giriş/ç�
 **Operasyon uygulaması** (`clients/ops`, :8080):
 - **Canlı izleme:** Son 60 saniyede konum göndermiş scooter'lar aktif sayılır. 15 saniyedir sessiz olan soluk görünür; sürüş bitmiş, sekme kapanmış ya da bağlantı kopmuş olabilir. 60 saniyede listeden düşer. Scooter'lar bulundukları bölgeye göre renklenir. Yanında anlık sayaçlar ve giriş/çıkış akışı var. Konumlar sunucuda 200 ms'lik gruplar halinde gönderilir; tarayıcıda React state'ine girmeden doğrudan Leaflet katmanında güncellenir.
 - **Giriş kayıtları:** `GET /logs` üzerinde scooter (filodaki kayıtlı scooterlar listelenir), alan, durum (içeride veya çıkmış) ve giriş zamanı aralığı filtreleri. Tablodaki scooter'a tıklayınca sağdan detay paneli açılır: durum ve kimde olduğu, son sinyal ve koordinat, içinde bulunduğu alanlar, cihaz günlüğü (sunucunun işlediği son konumlar; işlendi, eski olduğu için atlandı, girdi/çıktı; cihaz saati, gecikme, istek kimliği), son kiralamalar ve "bu scooter'ın kayıtlarını göster". Panel açıkken 5 sn'de bir yenilenir, Esc ya da × ile kapanır; tablo arkada kullanılabilir kalır. Cursor ile "daha fazla göster" ve kalış süresi. Yeni girişler geldikçe "N yeni giriş" bildirimi çıkar. Bu ekran canlı yayında yalnızca olay odasına (`events`) abone olur: tüm filonun konum yayınını (200 ms'de bir) almaz. Filtreye yazmak ya da yeni giriş sayacı tabloyu yeniden çizmez.
+- **Giriş kayıtlarında çıkış sebebi:** Sunucu, 30 saniye konumu gelmeyen scooter'ın girişini kapatır; ekranda "sinyal kesildi" olarak görünür. Liste yenilenene kadar 15 saniyedir konumu gelmeyen açık giriş "Sinyal yok · X önce" gösterilir. Alan düzenlenince ya da silinince kapanan girişler "alan değişti" / "alan silindi" notuyla görünür.
 - **Alanlar:** Çokgen veya dikdörtgen çizilip kaydedilir. Listeden "Düzenle" ile ad ve tip formda, şekil haritada köşeleri sürükleyerek değiştirilir (kenar ortasındaki noktadan yeni köşe eklenir); "Sil" sayfa içinde onay ister. Servis her değişikliği Redis üzerinden duyurur (`areas-changed`); açık sürücü uygulamaları haritayı sayfa yenilemeden günceller.
 - **Scooterlar:** Filo; her scooter'ın durumu (boşta ya da kimde), kiralamanın başladığı an ve son sinyal. Scooter eklenir ve silinir (sayfa içinde onayla; kullanımdaki silinemez). Liste kiralama ve bırakmalarla canlı güncellenir.
-- **Giriş kayıtlarında çıkış sebebi:** Alan dışından konum gelmeden kapanan çıkışlar etiketle görünür: "Sinyal kaybı", "Alan değişti", "Alan silindi".
 - Üst çubukta `/health`'ten beslenen sistem durumu: veritabanı, Redis ve kuyrukta bekleyen konumlar.
 
 Ortak kod (`clients/shared`): API istemcisi (sürücü oturumunu `Authorization` başlığıyla ekler), harita, levhalar, bölge renkleri, filo listesi ve stiller. API anahtarı tarayıcı koduna gömülmez; operasyon için üretimde nginx, geliştirmede Vite proxy'si ekler. Sürücü uygulaması anahtar kullanmaz (bkz. Güvenlik).
@@ -529,7 +547,7 @@ Değerler elle yazılmaz; her biri kendi katmanında tek bir yerde tanımlıdır
 
 | Ne | Nerede | Nasıl değişir |
 |---|---|---|
-| Sunucunun ortama göre değişen ayarları (veritabanı, Redis, şerit sayısı, yeniden deneme, rate limit, CORS, sürücü oturum süresi, başarısız giriş sınırı, sinyal kaybı süresi, cihaz günlüğü) | `api/src/config/configuration.ts` (liste: `api/.env.example`, Docker'da `docker-compose.yml` → `x-api-env`) | Ortam değişkeni; servis açılırken doğrulanır, geçersiz değerle açılmaz. Docker'da proje kökündeki `.env` ile (ör. `SIGNAL_LOSS_TIMEOUT_MS=300000`) verilip `docker compose up -d api worker` ile uygulanır |
+| Sunucunun ortama göre değişen ayarları (veritabanı, Redis, şerit sayısı, yeniden deneme, rate limit, CORS, sürücü oturum süresi, başarısız giriş sınırı, sinyal kaybı ve sessiz kiralama süreleri, cihaz günlüğü) | `api/src/config/configuration.ts` (liste: `api/.env.example`, Docker'da `docker-compose.yml` → `x-api-env`) | Ortam değişkeni; servis açılırken doğrulanır, geçersiz değerle açılmaz. Docker'da proje kökündeki `.env` ile (ör. `RENTAL_IDLE_TIMEOUT_MS=300000`) verilip `docker compose up -d api worker` ile uygulanır |
 | API sözleşmesinin ve iç işleyişin sabitleri (scooter kimliği biçimi, toplu istek boyutu, saat payı, sayfa boyutları, ad uzunlukları, kullanıcı adı/şifre kuralları, şifre özeti parametreleri, filo listesi yenileme, sinyal kaybı grup boyu) | `api/src/config/limits.ts` | Kodda; değiştirmek istemcilerin gördüğü davranışı değiştirebilir |
 | API sınırlarının istemcideki karşılıkları (formlar) | `clients/shared/src/api/limits.ts` | API'deki `limits.ts` ile birlikte |
 | Konum gönderme aralığı (**5 sn**, `GPS_INTERVAL_MS`), bölge sınırında ölçüm aralığı, gönderim kuyruğu sınırları, levha süresi, yol yapışma mesafeleri, oturumun saklandığı anahtar | `clients/driver/src/config.ts` | Kodda; sürücü uygulaması yeniden derlenir (`docker compose up -d --build driver`) |
@@ -538,7 +556,7 @@ Değerler elle yazılmaz; her biri kendi katmanında tek bir yerde tanımlıdır
 
 Birbirine bağlı ayarlar: konum aralığı kısalırsa `RATE_LIMIT_USER_PER_MIN` (varsayılan 60, 5 sn'lik gönderim dakikada 12 istek), `DEVICE_LOG_SIZE` (50 konum ≈ 4 dk) ve operasyon ekranının soluklaşma süreleri de gözden geçirilmeli.
 
-**Enum'lar:** API'de her biri kendi özelliğinin yanında bir `*.enum.ts` dosyasındadır: alan tipi, giriş/çıkış, çıkış sebebi, scooter durumu, kiralama bitiş sebebi, filo duyurusu türü, cihaz günlüğü sonucu, kimlik türü (servis/sürücü) ve erişim düzeyi, işleme sonucu, metrik etiketleri (ret sebebi, sinyal kaybı türü), Postgres hata kodları, health durumları, Socket.IO olay adları, log biçimi ve ortam. İstemcilerde API enum'larının karşılıkları `clients/shared/src/api/types.ts` ve `clients/shared/src/realtime/events.ts` içinde `as const` nesneleridir: kullanımı enum gibidir (`AreaType.PARKING`), tipi API'den gelen JSON değerleriyle doğrudan uyumludur; biri değişirse diğeri de değişmeli. Uygulamaya özel olanlar (hareket modu, cihaz günlüğü satır türü, sürüşün bitiş şekli, ekran akışı) kullanıldıkları özelliğin yanında `as const` nesneleridir.
+**Enum'lar:** API'de her biri kendi özelliğinin yanında bir `*.enum.ts` dosyasındadır: alan tipi, giriş/çıkış, çıkış sebebi, scooter durumu, kiralama bitiş sebebi, filo duyurusu türü, cihaz günlüğü sonucu, kimlik türü (servis/sürücü) ve erişim düzeyi, işleme sonucu, metrik etiketleri (ret sebebi), Postgres hata kodları, health durumları, Socket.IO olay adları, log biçimi ve ortam. İstemcilerde API enum'larının karşılıkları `clients/shared/src/api/types.ts` ve `clients/shared/src/realtime/events.ts` içinde `as const` nesneleridir: kullanımı enum gibidir (`AreaType.PARKING`), tipi API'den gelen JSON değerleriyle doğrudan uyumludur; biri değişirse diğeri de değişmeli. Uygulamaya özel olanlar (hareket modu, cihaz günlüğü satır türü, sürüşün bitiş şekli, ekran akışı) kullanıldıkları özelliğin yanında `as const` nesneleridir.
 
 ## Proje yapısı
 
@@ -553,7 +571,7 @@ api/src/
   queue/        kullanıcı şeritleri (LocationLanes: şerit kuyrukları, ekleme, sayımlar), şerit hash'i, iş biçimi
   security/     kimlik: AuthGuard (API anahtarı ya da sürücü oturumu), erişim dekoratörleri (@AllowRiders, @RidersOnly), RiderSessions (Redis), kullanıcı başına rate limit
   riders/       sürücü hesabı: POST /auth/register|login|logout, GET /auth/me; şifre özeti (Argon2id), başarısız giriş sınırı
-  fleet/        filo ve kiralama: /scooters (liste, detay, ekle, sil), /rentals; ScooterRegistry (bellekte kayıt listesi), kiralama önbelleği, filo duyuruları, cihaz günlüğü (DeviceLog)
+  fleet/        filo ve kiralama: /scooters (liste, detay, ekle, sil), /rentals; ScooterRegistry (bellekte kayıt listesi), kiralama önbelleği, filo duyuruları, cihaz günlüğü (DeviceLog), sessiz kiralama taraması (IdleRentalSweeper)
   metrics/      Prometheus metrik tanımları ve /metrics
   health/       /health
   config/       doğrulanan ayarlar (ConfigError), API sınırları (limits.ts), ortam/log enum'ları, CORS, logger, .env yükleme

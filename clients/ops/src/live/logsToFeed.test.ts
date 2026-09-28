@@ -2,7 +2,12 @@ import { describe, expect, test } from 'vitest';
 import type { LogEntry } from '@shared/api/types';
 import { logsToFeed, mergeFeed } from './logsToFeed';
 
-const log = (id: string, entryTime: string, exitTime: string | null): LogEntry => ({
+const log = (
+  id: string,
+  entryTime: string,
+  exitTime: string | null,
+  exitReason: LogEntry['exitReason'] = exitTime ? 'LEFT' : null,
+): LogEntry => ({
   id,
   userId: 'u1',
   areaId: 'a1',
@@ -10,7 +15,8 @@ const log = (id: string, entryTime: string, exitTime: string | null): LogEntry =
   areaType: 'NO_RIDE',
   entryTime,
   exitTime,
-  exitReason: null,
+  exitReason,
+  lastSeenAt: null,
 });
 
 describe('logsToFeed', () => {
@@ -24,6 +30,11 @@ describe('logsToFeed', () => {
       ['1-EXIT', 'EXIT'],
       ['1-ENTER', 'ENTER'],
     ]);
+  });
+
+  test('sinyali kesildiği için kapanan kayıt çıkış olayı üretmez', () => {
+    const feed = logsToFeed([log('1', '2026-01-01T10:00:00Z', '2026-01-01T10:05:00Z', 'SIGNAL_LOST')]);
+    expect(feed.map((f) => f.key)).toEqual(['1-ENTER']);
   });
 });
 

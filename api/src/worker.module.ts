@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { AppConfigModule } from './config/config.module.js';
 import { DatabaseModule } from './database/database.module.js';
 import { FleetInfraModule } from './fleet/fleet-infra.module.js';
+import { IdleRentalSweeper } from './fleet/idle-rental.sweeper.js';
 import { GeofenceModule } from './geofence/geofence.module.js';
 import { LaneWorkers } from './geofence/lane-workers.js';
 import { LocationProcessor } from './geofence/location.processor.js';
@@ -19,6 +20,11 @@ import { RealtimePublisherModule } from './realtime/realtime-publisher.module.js
     RealtimePublisherModule,
     FleetInfraModule,
   ],
-  providers: [LocationProcessor, LaneWorkers, SignalLossSweeper],
+  providers: [
+    LocationProcessor,
+    LaneWorkers,
+    SignalLossSweeper,
+    IdleRentalSweeper,
+  ],
 })
 export class WorkerModule {}

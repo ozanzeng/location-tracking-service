@@ -15,13 +15,14 @@ export const DEFAULT_SCOOTERS = [1, 2, 3, 4, 5].map((n) => {
  * - rentals: bir scooter aynı anda tek sürücüde, bir sürücü aynı anda tek scooter'da.
  *   İki kısmi unique index bunu veritabanında garanti eder; iki sürücü aynı scooter'a aynı
  *   anda basarsa biri reddedilir.
- * - area_logs.exit_reason: sinyali kesilen scooter'ın açık girişleri son sinyal anıyla
- *   kapatılır ve bu kolonla işaretlenir (normal çıkışta NULL). Kolon NULL varsayılanla
+ * - area_logs.exit_reason: çıkış alan dışından konum gelmeden yazıldıysa sebebi (sinyal kaybı;
+ *   AreaEdits ile alan değişti/silindi), normal çıkışta NULL. SignalLoss migration'ının
+ *   signal_lost kolonu UnifyExitReason'da buraya taşınır. Kolon NULL varsayılanla
  *   eklendiği için tablo yeniden yazılmaz; kısıt NOT VALID eklenip ayrıca doğrulanır:
  *   doğrulama tabloyu tararken okuma ve yazmaları bloklamaz.
  */
-export class FleetAndRiders1727400000000 implements MigrationInterface {
-  name = 'FleetAndRiders1727400000000';
+export class FleetAndRiders1727500000000 implements MigrationInterface {
+  name = 'FleetAndRiders1727500000000';
 
   public async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(`

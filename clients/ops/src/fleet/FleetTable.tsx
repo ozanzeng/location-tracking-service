@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { ScooterStatus, type Scooter } from '@shared/api/types';
-import { formatDuration } from '../logs/duration';
+import { formatAgo } from '../logs/duration';
 
 const dateFmt = new Intl.DateTimeFormat('tr-TR', {
   day: '2-digit',
@@ -8,11 +8,6 @@ const dateFmt = new Intl.DateTimeFormat('tr-TR', {
   hour: '2-digit',
   minute: '2-digit',
 });
-
-/** "3 dk 12 sn önce"; saat farkıyla gelecekte görünen zaman "az önce". */
-function ago(iso: string, now: number): string {
-  return Date.parse(iso) >= now ? 'az önce' : `${formatDuration(iso, new Date(now).toISOString())} önce`;
-}
 
 interface Props {
   scooters: Scooter[];
@@ -66,7 +61,7 @@ export function FleetTable({ scooters, removing, onRemove }: Props) {
               <td className="num">
                 {s.lastSeenAt ? (
                   <time dateTime={s.lastSeenAt} title={new Date(s.lastSeenAt).toLocaleString('tr-TR')}>
-                    {ago(s.lastSeenAt, now)}
+                    {formatAgo(s.lastSeenAt, now)}
                   </time>
                 ) : (
                   <span className="hint">Hiç konum yok</span>

@@ -787,3 +787,28 @@ README'deki "Ayarlar, sınırlar ve enum'lar" bölümü, hangi ayarın nerede ol
 | Tarayıcı e2e | ✓ 23/23 |
 | k6 (5.000 scooter, 2.000 istek/sn'ye kadar) | 101.750 konum, 0 hata, tepe p95 0,74 ms, p99 1,9 ms, en yüksek birikim 8 iş. Cihaz günlüğü öncesiyle aynı seviyede. Test verisi Redis dahil silindi. |
 
+
+### Soru 15
+
+> Pull commit push. (Sunucuda aynı konuya, sinyal kaybına, paralel bir çözüm vardı.) Hangisi daha iyi yapıdaysa onu al ve düzenle.
+
+**Cevap:** Sunucudaki `e85abe4` ("Sinyal kaybı: 30 sn konumu gelmeyen kullanıcının girişi kapanır") ile benim sinyal kaybı çözümüm aynı sorunu iki ayrı yoldan çözüyordu: aynı zaman damgalı iki migration, iki `ExitReason` enum'u, iki tarayıcı. Parça parça karşılaştırıp daha sağlam olanı aldım:
+
+| Parça | Seçilen | Neden |
+|---|---|---|
+| Giriş kayıtlarını kapatan tarama | Sunucudaki (`SignalLossSweeper`, 30 sn, 5 sn'de bir) | Sessizliği sunucu saatiyle (`seen_at`) ölçüyor; saati geride cihaz girişini kaybetmiyor. Kuyrukta bekleyen işin yaşı kadar pay bırakıyor, konum işlemeyle aynı kullanıcı kilidini kullanıyor. Benimki cihaz saatine bakıyordu. |
+| Çıkış sebebinin saklanması | Benimki (`area_logs.exit_reason` enum) | Sunucudaki ayrı bir `signal_lost` boolean kolonu ekliyordu; alan değişti/silindi sebepleri zaten `exit_reason`'daydı. İki yerde tutmak yerine tek kolon: yeni migration `UnifyExitReason` işaretli kayıtları taşıyıp eski kolonu kaldırıyor (geri alınabilir). |
+| API'deki `exitReason` | Sunucudaki biçim + benim değerlerim | `LEFT` / `SIGNAL_LOST` / `AREA_CHANGED` / `AREA_REMOVED`; açık girişte `null`. Sunucudaki `lastSeenAt` alanı da kaldı. |
+| Unutulan kiralama | Benimki, ayrı sınıf olarak (`IdleRentalSweeper`, `RENTAL_IDLE_TIMEOUT_MS` = 10 dk) | Sunucudaki çözümde kiralama yoktu. Girişleri kapatan 30 sn'lik süre kiralama için çok kısa (tünelde sürücü scooter'ını kaybederdi), bu yüzden ayrı ve uzun bir süre. Sessizliği sunucudaki gibi `seen_at` ve kuyruk payıyla ölçüyor. |
+| Operasyon ekranı | Sunucudaki "Sinyal yok · X önce" / "sinyal kesildi" + benim "alan değişti" / "alan silindi" notları, Scooter kolonu ve detay paneli | İkisi farklı şeyleri gösteriyordu, birleştirildi. Filo tablosu ve detay paneli sunucudaki ortak `formatAgo`'yu kullanıyor. |
+| Metrikler | Sunucudaki `area_visits_signal_lost_total` + benim `rentals_ended_idle_total` | Benim etiketli `signal_loss_total{kind}` metriğim ve enum'u kaldırıldı. |
+
+Migration sırası: sunucudaki `SignalLoss` (1727400000000) önce geldiği için benim üç migration'ım bir sonraki numaralara kaydırıldı (`FleetAndRiders` 1727500000000, `AreaEdits` 1727600000000, `RentalHistoryIndex` 1727700000000), `UnifyExitReason` 1727800000000. Benim migration'larımı daha önce çalıştırmış veritabanında `migrations` tablosundaki üç satırın adı ve zamanı güncellenmeli (dev ve test veritabanlarında yapıldı), yoksa `FleetAndRiders` yeniden çalışmaya kalkar:
+
+```sql
+UPDATE migrations SET timestamp=1727700000000, name='RentalHistoryIndex1727700000000' WHERE name='RentalHistoryIndex1727600000000';
+UPDATE migrations SET timestamp=1727600000000, name='AreaEdits1727600000000' WHERE name='AreaEdits1727500000000';
+UPDATE migrations SET timestamp=1727500000000, name='FleetAndRiders1727500000000' WHERE name='FleetAndRiders1727400000000';
+```
+
+**Doğrulama:** `./scripts/test-all.sh` tamamı yeşil: backend birim 183, frontend birim 117, veritabanı 54, backend e2e 108 (sessiz kiralama için yeni 4 test), smoke'lar, tarayıcı e2e 23. Dev veritabanında 9 migration uygulanmış, `signal_lost` kolonu kalkmış durumda.

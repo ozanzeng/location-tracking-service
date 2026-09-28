@@ -17,6 +17,18 @@ export type AreaType = (typeof AreaType)[keyof typeof AreaType];
 export const EventType = { ENTER: 'ENTER', EXIT: 'EXIT' } as const;
 export type EventType = (typeof EventType)[keyof typeof EventType];
 
+/**
+ * Girişin nasıl kapandığı (api/src/logs/exit-reason.enum.ts): alandan çıktı, konumu uzun süre
+ * gelmedi (sinyal kesildi), alanın şekli değişti ya da alan silindi.
+ */
+export const ExitReason = {
+  LEFT: 'LEFT',
+  SIGNAL_LOST: 'SIGNAL_LOST',
+  AREA_CHANGED: 'AREA_CHANGED',
+  AREA_REMOVED: 'AREA_REMOVED',
+} as const;
+export type ExitReason = (typeof ExitReason)[keyof typeof ExitReason];
+
 export const HealthStatus = { OK: 'ok', ERROR: 'error' } as const;
 export type HealthStatus = (typeof HealthStatus)[keyof typeof HealthStatus];
 
@@ -30,14 +42,6 @@ export type ScooterStatus = (typeof ScooterStatus)[keyof typeof ScooterStatus];
 /** Kiralamanın neden bittiği (api/src/fleet/rental-end-reason.enum.ts). */
 export const RentalEndReason = { RETURNED: 'RETURNED', SIGNAL_LOST: 'SIGNAL_LOST' } as const;
 export type RentalEndReason = (typeof RentalEndReason)[keyof typeof RentalEndReason];
-
-/** Giriş kaydının neden kapandığı; normal çıkışta null (api/src/geofence/exit-reason.enum.ts). */
-export const ExitReason = {
-  SIGNAL_LOST: 'SIGNAL_LOST',
-  AREA_CHANGED: 'AREA_CHANGED',
-  AREA_REMOVED: 'AREA_REMOVED',
-} as const;
-export type ExitReason = (typeof ExitReason)[keyof typeof ExitReason];
 
 export interface Area {
   id: string;
@@ -82,10 +86,13 @@ export interface LogEntry {
   entryTime: string;
   exitTime: string | null;
   /**
-   * SIGNAL_LOST: scooter uzun süre konum göndermedi, kayıt son sinyal anıyla kapatıldı.
-   * AREA_CHANGED / AREA_REMOVED: alanın şekli değişti (scooter dışarıda kaldı) ya da alan silindi.
+   * Açık girişte null. LEFT: alandan çıktı. SIGNAL_LOST: konumu 30 sn gelmedi, exitTime girişin
+   * kapatıldığı an. AREA_CHANGED / AREA_REMOVED: alanın şekli değişti (scooter dışarıda kaldı)
+   * ya da alan silindi.
    */
   exitReason: ExitReason | null;
+  /** Açık girişte servisin kullanıcıdan son konumu aldığı an; kapanmış girişte null. */
+  lastSeenAt: string | null;
 }
 
 export interface Scooter {

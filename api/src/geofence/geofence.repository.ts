@@ -94,10 +94,11 @@ export class GeofenceRepository {
     }> = await manager.query(
       `WITH
          upsert_location AS (
-           INSERT INTO user_last_location (user_id, lat, lng, recorded_at)
-           VALUES ($1, $2, $3, $4)
+           INSERT INTO user_last_location (user_id, lat, lng, recorded_at, seen_at)
+           VALUES ($1, $2, $3, $4, now())
            ON CONFLICT (user_id) DO UPDATE
-             SET lat = EXCLUDED.lat, lng = EXCLUDED.lng, recorded_at = EXCLUDED.recorded_at
+             SET lat = EXCLUDED.lat, lng = EXCLUDED.lng, recorded_at = EXCLUDED.recorded_at,
+                 seen_at = EXCLUDED.seen_at
          ),
          closed AS (
            UPDATE area_logs SET exit_time = $4

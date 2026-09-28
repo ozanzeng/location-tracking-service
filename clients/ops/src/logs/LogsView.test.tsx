@@ -12,6 +12,7 @@ const rows: LogEntry[] = Array.from({ length: 3 }, (_, i) => ({
   entryTime: '2026-09-28T10:00:00.000Z',
   exitTime: null,
   exitReason: null,
+  lastSeenAt: new Date().toISOString(),
 }));
 const scooters: Scooter[] = ['scooter-0', 'scooter-1', 'scooter-2'].map((id) => ({
   id,

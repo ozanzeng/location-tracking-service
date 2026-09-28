@@ -10,8 +10,8 @@ import type { MigrationInterface, QueryRunner } from 'typeorm';
  *   dışında kaldı) ve AREA_REMOVED (alan silindi). Enum'a değer eklemek geri alınamaz; geri
  *   alma sadece kolonu kaldırır, değerler kalır (IF NOT EXISTS ile tekrar çalıştırılabilir).
  */
-export class AreaEdits1727500000000 implements MigrationInterface {
-  name = 'AreaEdits1727500000000';
+export class AreaEdits1727600000000 implements MigrationInterface {
+  name = 'AreaEdits1727600000000';
 
   public async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(

@@ -1,20 +1,8 @@
 import { memo } from 'react';
-import { ExitReason, type LogEntry } from '@shared/api/types';
+import type { LogEntry } from '@shared/api/types';
 import { SignIcon } from '@shared/zones/SignIcon';
-import { formatDuration } from './duration';
-
-/** Çıkış alandan dışarı konum gelmeden kaydedildiyse sebebi (normal çıkışta etiket yok). */
-const EXIT_REASONS: Record<ExitReason, { label: string; title: string }> = {
-  [ExitReason.SIGNAL_LOST]: {
-    label: 'Sinyal kaybı',
-    title: 'Scooter uzun süre konum göndermedi; kayıt son sinyal anıyla kapatıldı. Gerçek çıkış bundan sonra olabilir.',
-  },
-  [ExitReason.AREA_CHANGED]: {
-    label: 'Alan değişti',
-    title: "Alanın şekli değiştirildi ve scooter'ın son konumu yeni şeklin dışında kaldı.",
-  },
-  [ExitReason.AREA_REMOVED]: { label: 'Alan silindi', title: 'Alan silindiği için kayıt kapatıldı.' },
-};
+import { formatAgo, formatDuration } from './duration';
+import { VisitStatus, visitStatus } from './visitStatus';
 
 const dateFmt = new Intl.DateTimeFormat('tr-TR', {
   day: '2-digit',
@@ -31,9 +19,12 @@ const dateFmt = new Intl.DateTimeFormat('tr-TR', {
  */
 export const LogsTable = memo(function LogsTable({
   rows,
+  now,
   onOpenScooter,
 }: {
   rows: LogEntry[];
+  /** "Sinyal yok · X önce" için şimdiki zaman; dakikada birkaç kez değişir. */
+  now: number;
   onOpenScooter: (scooterId: string) => void;
 }) {
   return (
@@ -70,18 +61,7 @@ export const LogsTable = memo(function LogsTable({
               <time dateTime={r.entryTime}>{dateFmt.format(new Date(r.entryTime))}</time>
             </td>
             <td className="num">
-              {r.exitTime ? (
-                <>
-                  <time dateTime={r.exitTime}>{dateFmt.format(new Date(r.exitTime))}</time>
-                  {r.exitReason ? (
-                    <span className="badge badge--warn" title={EXIT_REASONS[r.exitReason].title}>
-                      {EXIT_REASONS[r.exitReason].label}
-                    </span>
-                  ) : null}
-                </>
-              ) : (
-                <span className="badge">İçeride</span>
-              )}
+              <ExitCell entry={r} now={now} />
             </td>
             <td className="num">{r.exitTime ? formatDuration(r.entryTime, r.exitTime) : ''}</td>
           </tr>
@@ -90,3 +70,54 @@ export const LogsTable = memo(function LogsTable({
     </table>
   );
 });
+
+function ExitCell({ entry, now }: { entry: LogEntry; now: number }) {
+  switch (visitStatus(entry, now)) {
+    case VisitStatus.INSIDE:
+      return <span className="badge">İçeride</span>;
+    case VisitStatus.NO_SIGNAL:
+      return (
+        <span
+          className="badge badge--muted"
+          title={`Son konum ${dateFmt.format(new Date(entry.lastSeenAt!))}. Konum gelmediği için bilinen son durum "içeride".`}
+        >
+          Sinyal yok · {formatAgo(entry.lastSeenAt!, now)}
+        </span>
+      );
+    case VisitStatus.SIGNAL_LOST:
+      return (
+        <>
+          <time dateTime={entry.exitTime!}>{dateFmt.format(new Date(entry.exitTime!))}</time>{' '}
+          <span
+            className="badge badge--muted"
+            title="Konumu 30 sn gelmediği için kapatıldı; çıkış zamanı kapatıldığı an."
+          >
+            sinyal kesildi
+          </span>
+        </>
+      );
+    case VisitStatus.AREA_CHANGED:
+      return (
+        <>
+          <time dateTime={entry.exitTime!}>{dateFmt.format(new Date(entry.exitTime!))}</time>{' '}
+          <span
+            className="badge badge--muted"
+            title="Alanın şekli değiştirildi ve scooter'ın son konumu yeni şeklin dışında kaldı; çıkış zamanı değişikliğin anı."
+          >
+            alan değişti
+          </span>
+        </>
+      );
+    case VisitStatus.AREA_REMOVED:
+      return (
+        <>
+          <time dateTime={entry.exitTime!}>{dateFmt.format(new Date(entry.exitTime!))}</time>{' '}
+          <span className="badge badge--muted" title="Alan silindiği için kapatıldı; çıkış zamanı silindiği an.">
+            alan silindi
+          </span>
+        </>
+      );
+    case VisitStatus.LEFT:
+      return <time dateTime={entry.exitTime!}>{dateFmt.format(new Date(entry.exitTime!))}</time>;
+  }
+}

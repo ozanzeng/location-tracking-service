@@ -1,7 +1,8 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useAreas } from '@shared/hooks/useAreas';
 import { useScooters } from '@shared/hooks/useScooters';
 import { ScooterDrawer } from '../fleet/ScooterDrawer';
+import { LOGS_CLOCK_MS } from '../config';
 import { EMPTY_FILTERS, isEmpty, type LogFilters } from './logFilters';
 import { LogFiltersForm } from './LogFiltersForm';
 import { LogsTable } from './LogsTable';
@@ -18,6 +19,7 @@ export function LogsView() {
   const [applied, setApplied] = useState<LogFilters>(EMPTY_FILTERS);
   const [opened, setOpened] = useState<string | null>(null);
   const logs = useLogs(applied);
+  const now = useNow(LOGS_CLOCK_MS);
   // Sabit kimlikler: tablo (memo) filtre değişirken ya da panel açılıp kapanırken yeniden çizilmesin.
   const openScooter = useCallback((scooterId: string) => setOpened(scooterId), []);
   const closeScooter = useCallback(() => setOpened(null), []);
@@ -56,7 +58,7 @@ export function LogsView() {
       {logs.error ? <p className="error">Kayıtlar yüklenemedi: {logs.error}</p> : null}
 
       <div className="table-wrap">
-        <LogsTable rows={logs.rows} onOpenScooter={openScooter} />
+        <LogsTable rows={logs.rows} now={now} onOpenScooter={openScooter} />
         {!logs.rows.length && !logs.loading ? (
           <p className="hint logs__empty">
             {isEmpty(applied)
@@ -75,4 +77,14 @@ export function LogsView() {
       ) : null}
     </div>
   );
+}
+
+/** Belirli aralıkla değişen şimdiki zaman: "Sinyal yok · X önce" yazıları eskimesin. */
+function useNow(intervalMs: number): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), intervalMs);
+    return () => clearInterval(timer);
+  }, [intervalMs]);
+  return now;
 }

@@ -60,6 +60,18 @@ describe('Şema kısıtları', () => {
     );
   });
 
+  it('çıkış sebebi (sinyal kesildi, alan değişti/silindi) işaretli giriş kapanmış olmalı', async () => {
+    for (const reason of ['SIGNAL_LOST', 'AREA_CHANGED', 'AREA_REMOVED']) {
+      await expectPgError(
+        ds.query(
+          `INSERT INTO area_logs (user_id, area_id, entry_time, exit_reason) VALUES ('u', $1, now(), $2)`,
+          [areaId, reason],
+        ),
+        '23514',
+      );
+    }
+  });
+
   it('aynı kullanıcının aynı alanda iki açık girişi olamaz', async () => {
     await insertVisit('u1', '2026-01-01T10:00:00Z');
     await expectPgError(insertVisit('u1', '2026-01-01T10:05:00Z'), '23505');
@@ -91,14 +103,6 @@ describe('Şema kısıtları', () => {
         `INSERT INTO area_logs (user_id, area_id, entry_time) VALUES ('u1', gen_random_uuid(), now())`,
       ),
       '23503',
-    );
-  });
-
-  it('sinyal kaybı işareti sadece kapanmış girişte olabilir', async () => {
-    await insertVisit('u1', '2026-01-01T10:00:00Z');
-    await expectPgError(
-      ds.query(`UPDATE area_logs SET exit_reason = 'SIGNAL_LOST'`),
-      '23514',
     );
   });
 

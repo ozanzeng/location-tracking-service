@@ -63,14 +63,18 @@ export const areaTransitions = new Counter({
   labelNames: ['event'] as const,
 });
 
+export const signalLostVisits = new Counter({
+  name: 'area_visits_signal_lost_total',
+  help: 'Konumu uzun süre gelmediği için "sinyal kesildi" olarak kapatılan girişler',
+});
+
 export const jobFailures = new Counter({
   name: 'location_job_failures_total',
   help: 'Başarısız konum işleri (işin içindeki denemeler tükendikten sonra)',
 });
 
-/** Sinyal kaybı: kapatılan açık girişler (visit) ve biten kiralamalar (rental). */
-export const signalLosses = new Counter({
-  name: 'signal_loss_total',
-  help: 'Sinyali kesilen scooterlar için kapatılan girişler ve kiralamalar',
-  labelNames: ['kind'] as const,
+/** Scooter uzun süre konum göndermediği için biten kiralamalar (IdleRentalSweeper). */
+export const idleRentalsEnded = new Counter({
+  name: 'rentals_ended_idle_total',
+  help: 'Scooter RENTAL_IDLE_TIMEOUT_MS boyunca konum göndermediği için biten kiralamalar',
 });

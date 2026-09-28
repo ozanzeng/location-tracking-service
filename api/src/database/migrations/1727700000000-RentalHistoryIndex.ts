@@ -6,8 +6,8 @@ import { dropIfInvalid } from './1727100000000-OpenVisitIndexAndHotUpdates.js';
  * kiralamada büyür; scooter'a göre en yeniden eskiye okuma index olmadan tabloyu tarardı.
  * Yazmaları kilitlememek için CONCURRENTLY, bu yüzden transaction dışında.
  */
-export class RentalHistoryIndex1727600000000 implements MigrationInterface {
-  name = 'RentalHistoryIndex1727600000000';
+export class RentalHistoryIndex1727700000000 implements MigrationInterface {
+  name = 'RentalHistoryIndex1727700000000';
   transaction = false as const;
 
   public async up(queryRunner: QueryRunner): Promise<void> {

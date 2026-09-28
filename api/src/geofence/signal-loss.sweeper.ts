@@ -8,47 +8,25 @@ import {
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { APP_CONFIG, type AppConfig } from '../config/configuration.js';
-import { SIGNAL_LOSS_BATCH } from '../config/limits.js';
-import { FleetEvents } from '../fleet/fleet-events.js';
-import { FleetChange } from '../fleet/fleet-change.enum.js';
-import { RentalCache } from '../fleet/rental-cache.js';
-import { RentalEndReason } from '../fleet/rental-end-reason.enum.js';
-import { signalLosses } from '../metrics/metrics.js';
-import { SignalLossKind } from '../metrics/signal-loss-kind.enum.js';
-import { RealtimePublisher } from '../realtime/realtime.publisher.js';
-import type { AreaType } from '../areas/area-type.enum.js';
-import { AreaEventType } from './area-event-type.enum.js';
-import { ExitReason } from './exit-reason.enum.js';
-
-interface ClosedVisit {
-  id: string;
-  area_id: string;
-  name: string;
-  type: AreaType;
-  lat: number;
-  lng: number;
-  recorded_at: Date;
-}
-
-export interface SweepResult {
-  closedVisits: number;
-  endedRentals: number;
-}
+import { SIGNAL_LOSS_BATCH as SWEEP_BATCH } from '../config/limits.js';
+import { ExitReason } from '../logs/exit-reason.enum.js';
+import { signalLostVisits } from '../metrics/metrics.js';
+import { LocationLanes } from '../queue/location-lanes.js';
+import { GeofenceRepository } from './geofence.repository.js';
 
 /**
- * Sinyal kaybı: SIGNAL_LOSS_TIMEOUT_MS boyunca konum göndermeyen scooter'lar.
+ * Konum göndermeyi bırakan kullanıcının açık girişleri "içeride" kalmasın:
+ * SIGNAL_LOSS_TIMEOUT_MS (varsayılan 30 sn) boyunca konumu gelmeyen kullanıcının açık
+ * girişleri kapatılır. Çıkış zamanı kapatıldığı andır ve kayıt "sinyal kesildi" olarak
+ * işaretlenir (exit_reason = SIGNAL_LOST). Kullanıcı aynı alanda yeniden konum gönderirse yeni bir giriş açılır.
  *
- * - Açık giriş kayıtları son sinyal anıyla kapatılır ve exit_reason = SIGNAL_LOST ile
- *   işaretlenir. Aksi halde pili biten ya da uygulaması kapanan cihaz sonsuza kadar
- *   "içeride" görünürdü. Kullanıcı kilidi (GeofenceService'in aldığı advisory lock) alındığı
- *   için aynı anda işlenen bir konumla yarışmaz. Cihaz sonra dönerse (ya da çevrimdışı biriken konumları
- *   gelirse) içindeki alanlar için yeni giriş açılır; kapanan kaydın işaretinden aradaki
- *   boşluğun sinyal kaybı olduğu anlaşılır.
- * - Aktif kiralamalar son sinyal anıyla (hiç konum yoksa başlangıç anıyla) biter ve scooter
- *   boşa çıkar: sürüşü bitirmeden uygulamayı kapatan sürücü scooter'ı kilitli bırakmasın.
- *
- * Her worker çalıştırır; ayrıca lider seçimi gerekmez: iki worker aynı anda tarasa da bir kayıt
- * bir kez kapanır (UPDATE ... WHERE exit_time IS NULL / ended_at IS NULL), olay bir kez yayınlanır.
+ * - Sessizlik sunucunun konumu işlediği ana (seen_at) göre ölçülür, cihaz saatine göre değil:
+ *   saati geride olan cihaz, konum gönderirken sessiz sayılmaz.
+ * - Yük altında konumlar kuyrukta bekleyebilir. Arama, en eski bekleyen işin yaşı kadar ek pay
+ *   bırakır: konumu kuyrukta bekleyen kullanıcının girişi kapanıp yeniden açılmaz.
+ * - Her kullanıcı, konum işlemeyle aynı kullanıcı kilidi altında kapatılır ve sessizlik kilit
+ *   altında yeniden kontrol edilir: tam o sırada işlenen konum kaydı kapattırmaz.
+ * - Her worker süreci arar; aynı kullanıcıyı ikinci kez kapatacak açık giriş kalmaz.
  */
 @Injectable()
 export class SignalLossSweeper
@@ -56,158 +34,103 @@ export class SignalLossSweeper
 {
   private readonly logger = new Logger(SignalLossSweeper.name);
   private timer: NodeJS.Timeout | null = null;
-  private running: Promise<unknown> | null = null;
+  private running: Promise<number> | null = null;
+  private stopped = false;
+  /** Art arda başarısız aramalarda (ör. veritabanı kapalı) her seferinde uyarı basılmasın. */
+  private failing = false;
 
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
-    private readonly publisher: RealtimePublisher,
-    private readonly rentalCache: RentalCache,
-    private readonly fleetEvents: FleetEvents,
+    private readonly repository: GeofenceRepository,
+    private readonly lanes: LocationLanes,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
   ) {}
 
   onApplicationBootstrap(): void {
-    const { signalLossTimeoutMs, signalLossCheckMs } = this.config.worker;
+    const { signalLossTimeoutMs, signalLossSweepMs } = this.config.worker;
     if (signalLossTimeoutMs === 0) return;
-    this.timer = setInterval(() => this.tick(), signalLossCheckMs);
-    this.timer.unref();
+    this.timer = setInterval(() => void this.tick(), signalLossSweepMs);
   }
 
+  /** Yeni arama başlamaz; süren arama (kısa transaction'lar) bitirilir. */
   async onModuleDestroy(): Promise<void> {
+    this.stopped = true;
     if (this.timer) clearInterval(this.timer);
     await this.running?.catch(() => undefined);
   }
 
-  /** Bir önceki tur bitmediyse atlanır (veritabanı yavaşken turlar üst üste binmesin). */
-  private tick(): void {
+  private async tick(): Promise<void> {
+    // Önceki arama bitmediyse (ör. veritabanı yavaş) üst üste binmesin.
     if (this.running) return;
-    this.running = this.sweep()
-      .catch((err: Error) =>
-        this.logger.warn(`Sinyal kaybı taraması başarısız: ${err.message}`),
-      )
-      .finally(() => {
-        this.running = null;
-      });
-  }
-
-  async sweep(now = new Date()): Promise<SweepResult> {
-    const cutoff = new Date(
-      now.getTime() - this.config.worker.signalLossTimeoutMs,
-    );
-    const closedVisits = await this.closeVisits(cutoff);
-    const endedRentals = await this.endRentals(cutoff);
-    if (closedVisits + endedRentals > 0) {
-      this.logger.log({
-        message: 'Sinyali kesilen scooterlar kapatıldı',
-        closedVisits,
-        endedRentals,
-      });
+    this.running = this.sweep();
+    try {
+      await this.running;
+      if (this.failing)
+        this.logger.log('Sinyal kaybı araması yeniden çalışıyor');
+      this.failing = false;
+    } catch (err) {
+      if (!this.failing) {
+        this.logger.warn(
+          `Sinyal kaybı araması başarısız: ${(err as Error).message}`,
+        );
+      }
+      this.failing = true;
+    } finally {
+      this.running = null;
     }
-    return { closedVisits, endedRentals };
   }
 
-  /**
-   * Birikmiş iş (ör. toplu kesinti ya da ilk açılış) tek turda erir: 500'lük gruplar halinde,
-   * tur süresinin yarısı dolana kadar devam edilir. Başka bir worker'ın ya da o an işlenen bir
-   * konumun kilitlediği kullanıcı beklenmeden atlanır; sonraki turda tekrar bakılır.
-   */
-  private async closeVisits(cutoff: Date): Promise<number> {
-    const deadline = Date.now() + this.config.worker.signalLossCheckMs / 2;
+  /** Sessiz kullanıcıların açık girişlerini kapatır; kapatılan giriş sayısını döner. */
+  async sweep(): Promise<number> {
+    const pendingMs = await this.lanes.oldestPendingAgeMs();
+    const silentSeconds =
+      (this.config.worker.signalLossTimeoutMs + pendingMs) / 1000;
     let closed = 0;
     for (;;) {
-      // Açık girişler kısmi index'ten (exit_time IS NULL) okunur; tablo taranmaz.
       const users: Array<{ user_id: string }> = await this.dataSource.query(
-        `SELECT DISTINCT l.user_id
-           FROM area_logs l
-           JOIN user_last_location u ON u.user_id = l.user_id
-          WHERE l.exit_time IS NULL AND u.recorded_at < $1
-          LIMIT ${SIGNAL_LOSS_BATCH}`,
-        [cutoff],
+        `SELECT DISTINCT v.user_id
+           FROM area_logs v
+           JOIN user_last_location l ON l.user_id = v.user_id
+          WHERE v.exit_time IS NULL
+            AND l.seen_at < now() - make_interval(secs => $1)
+          LIMIT $2`,
+        [silentSeconds, SWEEP_BATCH],
       );
-      let closedInBatch = 0;
-      for (const { user_id: userId } of users) {
-        closedInBatch += await this.closeVisitsOf(userId, cutoff);
+      for (const { user_id } of users) {
+        if (this.stopped) return closed;
+        closed += await this.closeIfSilent(user_id, silentSeconds);
       }
-      closed += closedInBatch;
-      // Grup dolu değilse iş bitti; hiçbiri kapanmadıysa kalanlar başkasının elinde.
-      if (
-        users.length < SIGNAL_LOSS_BATCH ||
-        closedInBatch === 0 ||
-        Date.now() > deadline
-      ) {
-        return closed;
-      }
+      if (users.length < SWEEP_BATCH) break;
     }
+    if (closed > 0) {
+      signalLostVisits.inc(closed);
+      this.logger.log(`Sinyali kesilen ${closed} giriş kapatıldı`);
+    }
+    return closed;
   }
 
-  private async closeVisitsOf(userId: string, cutoff: Date): Promise<number> {
-    const visits = await this.dataSource.transaction(
-      async (manager): Promise<ClosedVisit[]> => {
-        // Kilit o an başkasındaysa (konumu işleniyor ya da başka worker kapatıyor) beklenmez.
-        const [{ locked }]: Array<{ locked: boolean }> = await manager.query(
-          `SELECT pg_try_advisory_xact_lock(hashtextextended($1, 0)) AS locked`,
-          [userId],
-        );
-        if (!locked) return [];
-        // Aday seçildikten sonra yeni bir konum işlendiyse son sinyal artık eski değildir.
-        return manager.query(
-          `WITH closed AS (
-             UPDATE area_logs l
-                SET exit_time = u.recorded_at, exit_reason = $3
-               FROM user_last_location u
-              WHERE l.user_id = $1 AND l.exit_time IS NULL
-                AND u.user_id = l.user_id AND u.recorded_at < $2
-             RETURNING l.id, l.area_id, u.lat, u.lng, u.recorded_at
-           )
-           SELECT c.*, a.name, a.type FROM closed c JOIN areas a ON a.id = c.area_id`,
-          [userId, cutoff, ExitReason.SIGNAL_LOST],
-        );
-      },
-    );
-    if (visits.length === 0) return 0;
-    signalLosses.inc({ kind: SignalLossKind.VISIT }, visits.length);
-    const recordedAt = visits[0].recorded_at.toISOString();
-    await this.publisher.publish({
-      position: {
-        userId,
-        lat: visits[0].lat,
-        lng: visits[0].lng,
-        recordedAt,
-        areas: [],
-      },
-      events: visits.map((v) => ({
-        logId: v.id,
-        userId,
-        eventType: AreaEventType.EXIT,
-        area: { id: v.area_id, name: v.name, type: v.type },
-        occurredAt: recordedAt,
-      })),
+  private closeIfSilent(
+    userId: string,
+    silentSeconds: number,
+  ): Promise<number> {
+    return this.dataSource.transaction(async (manager) => {
+      await this.repository.lockUser(manager, userId);
+      // Çıkış zamanı kapatıldığı an (giriş cihaz saatiyle ileride olabilir: ondan önce olamaz).
+      // CTE: TypeORM UPDATE için satırlar yerine [satırlar, sayı] döndürür.
+      const [{ closed }]: Array<{ closed: number }> = await manager.query(
+        `WITH closed AS (
+           UPDATE area_logs v
+              SET exit_time = GREATEST(now(), v.entry_time), exit_reason = $3
+             FROM user_last_location l
+            WHERE v.user_id = $1 AND v.exit_time IS NULL
+              AND l.user_id = v.user_id
+              AND l.seen_at < now() - make_interval(secs => $2)
+           RETURNING v.id
+         )
+         SELECT count(*)::int AS closed FROM closed`,
+        [userId, silentSeconds, ExitReason.SIGNAL_LOST],
+      );
+      return closed;
     });
-    return visits.length;
-  }
-
-  private async endRentals(cutoff: Date): Promise<number> {
-    const [rows]: [Array<{ rider_id: string; scooter_id: string }>, number] =
-      await this.dataSource.query(
-        `UPDATE rentals r
-            SET ended_at = s.last_signal, end_reason = $2
-           FROM (SELECT r2.id, greatest(r2.started_at, u.recorded_at) AS last_signal
-                   FROM rentals r2
-                   LEFT JOIN user_last_location u ON u.user_id = r2.scooter_id
-                  WHERE r2.ended_at IS NULL) s
-          WHERE r.id = s.id AND r.ended_at IS NULL AND s.last_signal < $1
-         RETURNING r.rider_id, r.scooter_id`,
-        [cutoff, RentalEndReason.SIGNAL_LOST],
-      );
-    if (rows.length === 0) return 0;
-    signalLosses.inc({ kind: SignalLossKind.RENTAL }, rows.length);
-    await this.rentalCache.clear(rows.map((r) => r.rider_id));
-    for (const row of rows) {
-      this.fleetEvents.publish({
-        change: FleetChange.RENTALS,
-        scooterId: row.scooter_id,
-      });
-    }
-    return rows.length;
   }
 }

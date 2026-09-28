@@ -3,7 +3,7 @@ import { api, ApiError } from '@shared/api/client';
 import { DeviceLogResult, EventType, RentalEndReason, ScooterStatus, type ScooterDetail } from '@shared/api/types';
 import { SignIcon } from '@shared/zones/SignIcon';
 import { SCOOTER_DETAIL_REFRESH_MS } from '../config';
-import { formatDuration } from '../logs/duration';
+import { formatAgo, formatDuration } from '../logs/duration';
 
 const timeFmt = new Intl.DateTimeFormat('tr-TR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 const dateFmt = new Intl.DateTimeFormat('tr-TR', {
@@ -12,9 +12,6 @@ const dateFmt = new Intl.DateTimeFormat('tr-TR', {
   hour: '2-digit',
   minute: '2-digit',
 });
-
-const ago = (iso: string, now: number) =>
-  Date.parse(iso) >= now ? 'az önce' : `${formatDuration(iso, new Date(now).toISOString())} önce`;
 
 const END_REASONS: Record<RentalEndReason, string> = {
   [RentalEndReason.RETURNED]: 'bıraktı',
@@ -109,7 +106,7 @@ export function ScooterDrawer({
                   dateTime={detail.lastLocation.recordedAt}
                   title={new Date(detail.lastLocation.recordedAt).toLocaleString('tr-TR')}
                 >
-                  {ago(detail.lastLocation.recordedAt, now)}
+                  {formatAgo(detail.lastLocation.recordedAt, now)}
                 </time>
                 <br />
                 <small className="num">
@@ -125,7 +122,7 @@ export function ScooterDrawer({
                   <li key={a.id}>
                     <SignIcon type={a.type} size={20} />
                     <span>{a.name}</span>
-                    <small>{ago(a.since, now)} girdi</small>
+                    <small>{formatAgo(a.since, now)} girdi</small>
                   </li>
                 ))}
               </ul>

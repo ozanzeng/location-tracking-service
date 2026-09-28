@@ -7,7 +7,10 @@ import {
   PrimaryGeneratedColumn,
 } from 'typeorm';
 import { Area } from '../areas/area.entity.js';
-import { ExitReason } from '../geofence/exit-reason.enum.js';
+import {
+  STORED_EXIT_REASONS,
+  type StoredExitReason,
+} from './exit-reason.enum.js';
 
 /**
  * Bir kullanıcının bir alana yaptığı ziyaret: girişte açılır, çıkışta exitTime doldurulur.
@@ -35,15 +38,18 @@ export class AreaLog {
   @Column({ name: 'exit_time', type: 'timestamptz', nullable: true })
   exitTime: Date | null;
 
-  /** Boş: normal çıkış. SIGNAL_LOST: scooter uzun süre konum göndermedi (SignalLossSweeper). */
+  /**
+   * Çıkış alandan dışarı konum gelmeden yazıldıysa sebebi (SIGNAL_LOST, AREA_CHANGED,
+   * AREA_REMOVED); normal çıkışta boş. SIGNAL_LOST'ta exitTime girişin kapatıldığı andır.
+   */
   @Column({
     name: 'exit_reason',
     type: 'enum',
-    enum: ExitReason,
+    enum: STORED_EXIT_REASONS,
     enumName: 'area_exit_reason',
     nullable: true,
   })
-  exitReason: ExitReason | null;
+  exitReason: StoredExitReason | null;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt: Date;

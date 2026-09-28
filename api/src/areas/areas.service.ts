@@ -7,7 +7,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import type { Polygon } from 'geojson';
 import { type EntityManager, Repository } from 'typeorm';
 import { AreaEventType } from '../geofence/area-event-type.enum.js';
-import { ExitReason } from '../geofence/exit-reason.enum.js';
+import { ExitReason } from '../logs/exit-reason.enum.js';
 import type { AreaEvent, AreaRef } from '../geofence/geofence.types.js';
 import { RealtimePublisher } from '../realtime/realtime.publisher.js';
 import { Area } from './area.entity.js';

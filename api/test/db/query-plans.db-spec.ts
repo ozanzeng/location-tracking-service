@@ -80,6 +80,19 @@ describe('Sorgu planları ve performans ayarları', () => {
     expect(await indexesUsed(ds, sql)).toContain('area_logs_open_visit_uq');
   });
 
+  it('sinyal kaybı araması: açık girişlerin kısmi index’inden (tüm tabloyu taramaz)', async () => {
+    const used = await indexesUsed(
+      ds,
+      `SELECT DISTINCT v.user_id FROM area_logs v JOIN user_last_location l ON l.user_id = v.user_id
+        WHERE v.exit_time IS NULL AND l.seen_at < now() - interval '30 minutes' LIMIT 500`,
+    );
+    expect(
+      used.some((name) =>
+        ['area_logs_open_visit_uq', 'area_logs_open_entry_idx'].includes(name),
+      ),
+    ).toBe(true);
+  });
+
   it('user_last_location HOT güncellenir (recorded_at index’i yok, fillfactor 70)', async () => {
     const [{ reloptions }] = await ds.query(
       `SELECT reloptions FROM pg_class WHERE relname = 'user_last_location'`,

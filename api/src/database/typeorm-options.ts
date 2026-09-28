@@ -10,9 +10,11 @@ import { Init1727000000000 } from './migrations/1727000000000-Init.js';
 import { OpenVisitIndexAndHotUpdates1727100000000 } from './migrations/1727100000000-OpenVisitIndexAndHotUpdates.js';
 import { AreaLogsAutovacuum1727200000000 } from './migrations/1727200000000-AreaLogsAutovacuum.js';
 import { QueryStats1727300000000 } from './migrations/1727300000000-QueryStats.js';
-import { FleetAndRiders1727400000000 } from './migrations/1727400000000-FleetAndRiders.js';
-import { AreaEdits1727500000000 } from './migrations/1727500000000-AreaEdits.js';
-import { RentalHistoryIndex1727600000000 } from './migrations/1727600000000-RentalHistoryIndex.js';
+import { SignalLoss1727400000000 } from './migrations/1727400000000-SignalLoss.js';
+import { FleetAndRiders1727500000000 } from './migrations/1727500000000-FleetAndRiders.js';
+import { AreaEdits1727600000000 } from './migrations/1727600000000-AreaEdits.js';
+import { RentalHistoryIndex1727700000000 } from './migrations/1727700000000-RentalHistoryIndex.js';
+import { UnifyExitReason1727800000000 } from './migrations/1727800000000-UnifyExitReason.js';
 
 export const ENTITIES = [
   Area,
@@ -27,9 +29,11 @@ export const MIGRATIONS = [
   OpenVisitIndexAndHotUpdates1727100000000,
   AreaLogsAutovacuum1727200000000,
   QueryStats1727300000000,
-  FleetAndRiders1727400000000,
-  AreaEdits1727500000000,
-  RentalHistoryIndex1727600000000,
+  SignalLoss1727400000000,
+  FleetAndRiders1727500000000,
+  AreaEdits1727600000000,
+  RentalHistoryIndex1727700000000,
+  UnifyExitReason1727800000000,
 ];
 
 /**

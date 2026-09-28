@@ -1,6 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { AreaType } from '../../areas/area-type.enum.js';
-import { ExitReason } from '../../geofence/exit-reason.enum.js';
+import { ExitReason } from '../exit-reason.enum.js';
 
 export class LogResponseDto {
   @ApiProperty()
@@ -30,11 +30,20 @@ export class LogResponseDto {
 
   @ApiProperty({
     enum: ExitReason,
+    enumName: 'ExitReason',
     nullable: true,
     description:
-      'Çıkış nasıl kaydedildi: null ise alan dışından konum geldi; SIGNAL_LOST ise scooter uzun süre konum göndermedi ve kayıt son sinyal anıyla kapatıldı',
+      'Çıkışın sebebi: LEFT alandan çıktı; SIGNAL_LOST konumu SIGNAL_LOSS_TIMEOUT_MS (30 sn) boyunca gelmedi, exitTime girişin kapatıldığı an; AREA_CHANGED alanın şekli değişti ve son konum yeni şeklin dışında kaldı; AREA_REMOVED alan silindi. Açık girişte null',
   })
   exitReason: ExitReason | null;
+
+  @ApiProperty({
+    nullable: true,
+    type: String,
+    description:
+      'Açık girişte: servisin kullanıcıdan son konumu aldığı an. Eskiyse kullanıcı konum göndermiyor (sinyal yok); "içeride" son bilinen durumdur. Kapanmış girişte null',
+  })
+  lastSeenAt: string | null;
 }
 
 export class LogPageDto {

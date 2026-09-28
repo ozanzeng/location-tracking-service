@@ -68,12 +68,19 @@ export interface AppConfig {
     /** Kapanışta aktif işin bitmesi için beklenen en uzun süre (ms); sonra iş başka worker'a kalır. */
     shutdownGraceMs: number;
     /**
-     * Bu kadar süre konum göndermeyen scooter'ın sinyali kesilmiş sayılır (ms): açık giriş
-     * kayıtları son sinyal anıyla kapatılır, kiralaması biter ve scooter boşa çıkar. 0 kapatır.
+     * Bu kadar süre (ms) konumu gelmeyen kullanıcının açık girişleri "sinyal kesildi" olarak
+     * kapatılır (çıkış zamanı: kapatıldığı an); 0 kapatır. Kuyrukta bekleyen konumlar için
+     * arama ayrıca en eski bekleyen işin yaşı kadar pay bırakır.
      */
     signalLossTimeoutMs: number;
-    /** Sinyali kesilen scooter'ların aranma aralığı (ms). */
-    signalLossCheckMs: number;
+    /** Sinyali kesilen kullanıcıların ve sessiz kiralamaların aranma aralığı (ms). */
+    signalLossSweepMs: number;
+    /**
+     * Bu kadar süre (ms) konumu gelmeyen scooter'ın kiralaması biter ve scooter boşa çıkar;
+     * 0 kapatır. Girişlerden (SIGNAL_LOSS_TIMEOUT_MS) uzun: kısa bir ağ kopmasında sürücü
+     * scooter'ını kaybetmesin. Sessizlik sunucu saatiyle (seen_at) ölçülür.
+     */
+    rentalIdleTimeoutMs: number;
   };
   realtime: {
     enabled: boolean;
@@ -304,15 +311,22 @@ export function loadConfig(
       maxStalledCount: int('WORKER_MAX_STALLED_COUNT', 3, 1, 100),
       // docker stop 10 sn sonra süreci öldürür; ondan önce bitsin.
       shutdownGraceMs: int('WORKER_SHUTDOWN_GRACE_MS', 8000, 0, 600_000),
-      // Cihaz 5 sn'de bir gönderir; 10 dk sessizlik kısa bir tünel ya da ağ kopukluğundan
-      // ayırt edilecek kadar uzun. Çevrimdışı biriken konumlar sonradan gelirse kaybolmaz.
+      // Cihazlar 5 sn'de bir gönderir: 30 sn = art arda 6 konum gelmedi. Sürüş bitince
+      // uygulama konum göndermeyi bırakır; park edilen scooter da 30 sn sonra kapanır.
       signalLossTimeoutMs: int(
         'SIGNAL_LOSS_TIMEOUT_MS',
+        30_000,
+        0,
+        7 * 86_400_000,
+      ),
+      signalLossSweepMs: int('SIGNAL_LOSS_SWEEP_MS', 5000, 100, 3_600_000),
+      // Kiralama için 10 dk: tünel ya da kısa ağ kopukluğu sürücüyü scooter'dan etmesin.
+      rentalIdleTimeoutMs: int(
+        'RENTAL_IDLE_TIMEOUT_MS',
         600_000,
         0,
-        86_400_000,
+        7 * 86_400_000,
       ),
-      signalLossCheckMs: int('SIGNAL_LOSS_CHECK_MS', 30_000, 100, 3_600_000),
     },
     realtime: {
       enabled: env.REALTIME_ENABLED !== 'false',

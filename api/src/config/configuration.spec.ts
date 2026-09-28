@@ -156,6 +156,18 @@ describe('loadConfig doğrulama', () => {
     ).toEqual([]);
   });
 
+  it("sinyal kaybı: varsayılan 30 sn (5 sn'de bir aranır), 0 ile kapatılır", () => {
+    expect(loadConfig({}).worker).toMatchObject({
+      signalLossTimeoutMs: 30_000,
+      signalLossSweepMs: 5000,
+    });
+    expect(
+      loadConfig({ SIGNAL_LOSS_TIMEOUT_MS: '0' }).worker.signalLossTimeoutMs,
+    ).toBe(0);
+    expect(problemsFor({ SIGNAL_LOSS_SWEEP_MS: '0' })).toHaveLength(1);
+    expect(problemsFor({ SIGNAL_LOSS_TIMEOUT_MS: '-5' })).toHaveLength(1);
+  });
+
   it('veritabanı zaman aşımları varsayılan ve ayarlanabilir', () => {
     expect(loadConfig({}).db).toMatchObject({
       statementTimeoutMs: 5000,

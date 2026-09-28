@@ -4,6 +4,6 @@ import { GeofenceService } from './geofence.service.js';
 
 @Module({
   providers: [GeofenceService, GeofenceRepository],
-  exports: [GeofenceService],
+  exports: [GeofenceService, GeofenceRepository],
 })
 export class GeofenceModule {}

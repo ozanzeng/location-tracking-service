@@ -9,7 +9,8 @@ import {
   loadConfig,
 } from '../src/config/configuration.js';
 import { ScooterRegistry } from '../src/fleet/scooter-registry.js';
-import { DEFAULT_SCOOTERS } from '../src/database/migrations/1727400000000-FleetAndRiders.js';
+import { DEFAULT_SCOOTERS } from '../src/database/migrations/1727500000000-FleetAndRiders.js';
+import type { ExitReason } from '../src/logs/exit-reason.enum.js';
 import { LocationLanes } from '../src/queue/location-lanes.js';
 import { setupApp } from '../src/setup-app.js';
 import { WorkerModule } from '../src/worker.module.js';
@@ -42,7 +43,18 @@ const ANY_SCOOTER: Pick<
 export async function createTestApp(
   options: TestAppOptions = {},
 ): Promise<INestApplication> {
-  const base = loadConfig();
+  const loaded = loadConfig();
+  // Sinyal kaybı ve sessiz kiralama aramaları testlerde kapalı: 30 sn'den uzun süren bir
+  // dosyada açık girişler ve kiralamalar kendiliğinden kapanmasın. Bu davranışları sınayan
+  // testler kendi süresini verir.
+  const base: AppConfig = {
+    ...loaded,
+    worker: {
+      ...loaded.worker,
+      signalLossTimeoutMs: 0,
+      rentalIdleTimeoutMs: 0,
+    },
+  };
   let builder = Test.createTestingModule({
     imports:
       options.withWorker === false ? [AppModule] : [AppModule, WorkerModule],
@@ -170,7 +182,8 @@ export interface LogRow {
   areaId: string;
   entryTime: string;
   exitTime: string | null;
-  exitReason: string | null;
+  exitReason: `${ExitReason}` | null;
+  lastSeenAt: string | null;
 }
 
 /** Kullanıcının giriş kayıtları (en yeni başta). API anahtarı gerekiyorsa `apiKey`. */

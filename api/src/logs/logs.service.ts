@@ -3,9 +3,9 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import type { AreaType } from '../areas/area-type.enum.js';
 import { decodeCursor, encodeCursor } from './cursor.js';
+import { ExitReason, type StoredExitReason } from './exit-reason.enum.js';
 import type { ListLogsQueryDto } from './dto/list-logs-query.dto.js';
 import type { LogPageDto } from './dto/log-response.dto.js';
-import type { ExitReason } from '../geofence/exit-reason.enum.js';
 
 interface LogRow {
   id: string;
@@ -15,7 +15,8 @@ interface LogRow {
   area_type: AreaType;
   entry_time: Date;
   exit_time: Date | null;
-  exit_reason: ExitReason | null;
+  exit_reason: StoredExitReason | null;
+  last_seen_at: Date | null;
 }
 
 @Injectable()
@@ -54,9 +55,10 @@ export class LogsService {
     const limit = query.limit;
     const rows: LogRow[] = await this.dataSource.query(
       `SELECT l.id, l.user_id, l.area_id, a.name AS area_name, a.type AS area_type,
-              l.entry_time, l.exit_time, l.exit_reason
+              l.entry_time, l.exit_time, l.exit_reason, u.seen_at AS last_seen_at
          FROM area_logs l
          JOIN areas a ON a.id = l.area_id
+         LEFT JOIN user_last_location u ON l.exit_time IS NULL AND u.user_id = l.user_id
         ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
         ORDER BY l.entry_time DESC, l.id DESC
         LIMIT ${param(limit + 1)}`,
@@ -76,7 +78,8 @@ export class LogsService {
         areaType: r.area_type,
         entryTime: r.entry_time.toISOString(),
         exitTime: r.exit_time?.toISOString() ?? null,
-        exitReason: r.exit_reason,
+        exitReason: exitReason(r),
+        lastSeenAt: r.last_seen_at?.toISOString() ?? null,
       })),
       nextCursor:
         hasMore && last
@@ -87,4 +90,9 @@ export class LogsService {
           : null,
     };
   }
+}
+
+function exitReason(row: LogRow): ExitReason | null {
+  if (!row.exit_time) return null;
+  return row.exit_reason ?? ExitReason.LEFT;
 }

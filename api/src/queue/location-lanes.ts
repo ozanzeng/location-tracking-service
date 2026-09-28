@@ -178,6 +178,28 @@ export class LocationLanes
     return Promise.all(this.queues().map((q) => q.getWaitingCount()));
   }
 
+  /**
+   * İşlenmeyi bekleyen (ya da işlenmekte olan) en eski işin yaşı (ms); kuyruk boşsa 0.
+   * Sinyal kaybı araması bu kadar ek pay bırakır: yük altında konumu kuyrukta bekleyen
+   * kullanıcı sessiz sayılmasın.
+   */
+  async oldestPendingAgeMs(now = Date.now()): Promise<number> {
+    const heads = await Promise.all(
+      this.queues().map((q) =>
+        q.getJobs(['active', 'wait', 'prioritized', 'delayed'], 0, 0, true),
+      ),
+    );
+    let oldest = now;
+    for (const jobs of heads) {
+      for (const job of jobs) {
+        // İş aradaki anda bitip silinmiş olabilir.
+        if (job?.timestamp !== undefined && job.timestamp < oldest)
+          oldest = job.timestamp;
+      }
+    }
+    return now - oldest;
+  }
+
   /** Worker'ın dinlediği kuyruklar: şeritler ve güncellemeden kalmış eski kuyruk. */
   queues(): Queue[] {
     return [...this.lanes, this.legacy];
