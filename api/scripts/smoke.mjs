@@ -1,11 +1,18 @@
 // Ayakta olan bir ortama (yerel, staging, prod) karşı uçtan uca smoke testi.
 // Kullanım: BASE_URL=http://localhost:3000 API_KEY=dev-api-key npm run smoke
 //
-// Tek bir sabit test alanı kullanır ("smoke-test-area", Güney Okyanusu'nda; gerçek
-// kullanıcılar giremez) ve her koşuda benzersiz bir kullanıcı kimliğiyle konum gönderir.
+// Tek bir sabit test alanı ("smoke-test-area", Güney Okyanusu'nda; gerçek scooterlar
+// giremez) ve her koşuda benzersiz bir test scooter'ı ("smoke-…") kullanır. Sadece kayıtlı
+// scooterlar konum gönderebildiği için scooter koşu başında filoya eklenir, sonunda çıkarılır
+// (yumuşak silme: sürücülerin seçim listesinde ve operasyonun filo ekranında görünmez).
+// Kimlik benzersiz: aynı scooter'la arka arkaya koşulsaydı yeni koşunun konumları öncekinin
+// son konumundan eski kalıp "geç gelen konum" olarak atlanabilirdi.
 // Herhangi bir adım başarısız olursa 1 koduyla çıkar.
 
-const BASE_URL = (process.env.BASE_URL ?? 'http://localhost:3000').replace(/\/$/, '');
+const BASE_URL = (process.env.BASE_URL ?? 'http://localhost:3000').replace(
+  /\/$/,
+  '',
+);
 const API_KEY = process.env.API_KEY ?? 'dev-api-key';
 const TIMEOUT_MS = Number(process.env.SMOKE_TIMEOUT_MS ?? 20_000);
 
@@ -82,18 +89,22 @@ async function waitFor(fn, what) {
 const ts = (msAgo) => new Date(Date.now() - msAgo).toISOString();
 let areaId;
 
-console.log(`Smoke testi: ${BASE_URL} (kullanıcı ${userId})\n`);
+console.log(`Smoke testi: ${BASE_URL} (scooter ${userId})\n`);
 
 await step('servis sağlıklı (DB + Redis)', async () => {
   const { status, json } = await call('GET', '/health', { auth: false });
   expect(status === 200, `GET /health → ${status}`);
-  expect(json.database === 'up' && json.redis === 'up', `health: ${JSON.stringify(json)}`);
+  expect(
+    json.database === 'up' && json.redis === 'up',
+    `health: ${JSON.stringify(json)}`,
+  );
   return `kuyrukta bekleyen: ${json.queue.waiting}`;
 });
 
 await step('anahtarsız istek reddedilir', async () => {
   const { status } = await call('GET', '/areas', { auth: false });
-  if (status === 200) return '(uyarı: sunucuda API_KEYS tanımlı değil, doğrulama kapalı)';
+  if (status === 200)
+    return '(uyarı: sunucuda API_KEYS tanımlı değil, doğrulama kapalı)';
   expect(status === 401, `anahtarsız GET /areas → ${status}, 401 bekleniyordu`);
 });
 
@@ -103,14 +114,41 @@ await step('POST /areas + GET /areas', async () => {
   let area = list.json.find((a) => a.name === AREA_NAME);
   if (!area) {
     const created = await call('POST', '/areas', { body: AREA });
-    expect(created.status === 201, `POST /areas → ${created.status} ${created.text}`);
+    expect(
+      created.status === 201,
+      `POST /areas → ${created.status} ${created.text}`,
+    );
     area = created.json;
     const again = await call('GET', '/areas');
-    expect(again.json.some((a) => a.id === area.id), 'yeni alan GET /areas içinde yok');
+    expect(
+      again.json.some((a) => a.id === area.id),
+      'yeni alan GET /areas içinde yok',
+    );
   }
   expect(area.geometry?.type === 'Polygon', 'alan geometrisi Polygon değil');
   areaId = area.id;
   return `alan ${areaId}`;
+});
+
+await step('test scooter filoda; kayıtsız scooter reddedilir', async () => {
+  const created = await call('POST', '/scooters', {
+    body: { id: userId, name: 'Smoke testi' },
+  });
+  expect(
+    created.status === 201,
+    `POST /scooters → ${created.status} ${created.text}`,
+  );
+  const unknown = await call('POST', '/locations', {
+    body: {
+      userId: `kayitsiz-${Date.now().toString(36)}`,
+      ...OUTSIDE,
+      timestamp: ts(3000),
+    },
+  });
+  expect(
+    unknown.status === 400,
+    `kayıtsız scooter → ${unknown.status}, 400 bekleniyordu`,
+  );
 });
 
 const entryTime = ts(2000);
@@ -118,24 +156,39 @@ await step('POST /locations (dışarı → içeri)', async () => {
   const outside = await call('POST', '/locations', {
     body: { userId, ...OUTSIDE, timestamp: ts(3000) },
   });
-  expect(outside.status === 202, `POST /locations → ${outside.status} ${outside.text}`);
+  expect(
+    outside.status === 202,
+    `POST /locations → ${outside.status} ${outside.text}`,
+  );
   const inside = await call('POST', '/locations', {
     body: { userId, ...INSIDE, timestamp: entryTime },
   });
-  expect(inside.status === 202, `POST /locations → ${inside.status} ${inside.text}`);
+  expect(
+    inside.status === 202,
+    `POST /locations → ${inside.status} ${inside.text}`,
+  );
 });
 
-await step('giriş GET /logs içinde (User ID, Area ID, Entry Time)', async () => {
-  expect(areaId, 'alan oluşturulamadığı için atlandı');
-  const log = await waitFor(async () => {
-    const { json } = await call('GET', `/logs?userId=${userId}&areaId=${areaId}`);
-    return json?.data?.[0];
-  }, 'giriş kaydı');
-  expect(log.userId === userId, `userId ${log.userId}`);
-  expect(log.areaId === areaId, `areaId ${log.areaId}`);
-  expect(log.entryTime === entryTime, `entryTime ${log.entryTime}, beklenen ${entryTime}`);
-  return `(${log.entryTime})`;
-});
+await step(
+  'giriş GET /logs içinde (User ID, Area ID, Entry Time)',
+  async () => {
+    expect(areaId, 'alan oluşturulamadığı için atlandı');
+    const log = await waitFor(async () => {
+      const { json } = await call(
+        'GET',
+        `/logs?userId=${userId}&areaId=${areaId}`,
+      );
+      return json?.data?.[0];
+    }, 'giriş kaydı');
+    expect(log.userId === userId, `userId ${log.userId}`);
+    expect(log.areaId === areaId, `areaId ${log.areaId}`);
+    expect(
+      log.entryTime === entryTime,
+      `entryTime ${log.entryTime}, beklenen ${entryTime}`,
+    );
+    return `(${log.entryTime})`;
+  },
+);
 
 await step('çıkışta exitTime dolar', async () => {
   const res = await call('POST', '/locations', {
@@ -143,7 +196,10 @@ await step('çıkışta exitTime dolar', async () => {
   });
   expect(res.status === 202, `POST /locations → ${res.status}`);
   await waitFor(async () => {
-    const { json } = await call('GET', `/logs?userId=${userId}&areaId=${areaId}`);
+    const { json } = await call(
+      'GET',
+      `/logs?userId=${userId}&areaId=${areaId}`,
+    );
     return json?.data?.[0]?.exitTime;
   }, 'exitTime');
 });
@@ -155,10 +211,18 @@ await step('eksik timestamp 400 ile reddedilir', async () => {
   expect(status === 400, `→ ${status}`);
 });
 
+await step('test scooter filodan çıkarılır', async () => {
+  const { status, text } = await call('DELETE', `/scooters/${userId}`);
+  expect(status === 204, `DELETE /scooters → ${status} ${text}`);
+});
+
 await step('metrikler yayınlanıyor', async () => {
   const { status, text } = await call('GET', '/metrics', { auth: false });
   expect(status === 200, `GET /metrics → ${status}`);
-  expect(text.includes('locations_accepted_total'), 'locations_accepted_total yok');
+  expect(
+    text.includes('locations_accepted_total'),
+    'locations_accepted_total yok',
+  );
 });
 
 const seconds = ((Date.now() - started) / 1000).toFixed(1);

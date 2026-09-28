@@ -7,6 +7,7 @@ import {
 import type { Redis } from 'ioredis';
 import { APP_CONFIG, type AppConfig } from '../config/configuration.js';
 import { closeRedis, createRedis } from '../common/redis/create-redis.js';
+import type { AreaEvent } from '../geofence/geofence.types.js';
 import {
   areasChannel,
   updatesChannel,
@@ -40,7 +41,13 @@ export class RealtimePublisher implements OnApplicationShutdown {
     return this.send(this.updates, message);
   }
 
-  /** API: yeni alan oluşturuldu; istemciler alan listesini yeniler. */
+  /** API: alan düzenlenince ya da silinince kapanan girişlerin çıkış olayları. */
+  publishEvents(events: AreaEvent[]): Promise<void> {
+    if (events.length === 0) return Promise.resolve();
+    return this.send(this.updates, { events });
+  }
+
+  /** API: alan oluşturuldu, düzenlendi ya da silindi; istemciler alan listesini yeniler. */
   publishAreasChanged(message: AreasChangedMessage): Promise<void> {
     return this.send(this.areas, message);
   }

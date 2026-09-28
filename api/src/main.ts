@@ -16,7 +16,7 @@ async function bootstrap() {
     return503OnClosing: true,
   });
   setupApp(app);
-  for (const warning of securityWarnings(config.security, process.env)) {
+  for (const warning of securityWarnings(config.security)) {
     new Logger('Security').warn(warning);
   }
   await app.listen(config.port);

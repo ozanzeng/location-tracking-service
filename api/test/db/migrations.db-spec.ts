@@ -1,6 +1,7 @@
 import { DataSource, type DataSourceOptions } from 'typeorm';
 import { type AppConfig, loadConfig } from '../../src/config/configuration.js';
 import { revertLastMigration } from '../../src/database/migration-runner.js';
+import { DEFAULT_SCOOTERS } from '../../src/database/migrations/1727400000000-FleetAndRiders.js';
 import { OpenVisitIndexAndHotUpdates1727100000000 } from '../../src/database/migrations/1727100000000-OpenVisitIndexAndHotUpdates.js';
 import {
   migrationOptions,
@@ -21,7 +22,8 @@ describe('Migration’lar (boş veritabanı)', () => {
     (
       await ds.query(
         `SELECT table_name FROM information_schema.tables
-          WHERE table_schema = 'public' AND table_name IN ('areas', 'area_logs', 'user_last_location')
+          WHERE table_schema = 'public'
+            AND table_name IN ('areas', 'area_logs', 'user_last_location', 'scooters', 'riders', 'rentals')
           ORDER BY 1`,
       )
     ).map((r: { table_name: string }) => r.table_name);
@@ -56,8 +58,18 @@ describe('Migration’lar (boş veritabanı)', () => {
     expect(await tables()).toEqual([
       'area_logs',
       'areas',
+      'rentals',
+      'riders',
+      'scooters',
       'user_last_location',
     ]);
+    // Kurulumda hazır gelen filo.
+    const scooters = await ds.query(
+      'SELECT id FROM scooters WHERE deleted_at IS NULL ORDER BY id',
+    );
+    expect(scooters.map((s: { id: string }) => s.id)).toEqual(
+      DEFAULT_SCOOTERS.map((s) => s.id),
+    );
     // Eklentileri sadece migration kurar; TypeORM açılışta kendi eklentisini eklemez.
     const extensions = await ds.query(
       `SELECT extname FROM pg_extension WHERE extname <> 'plpgsql' ORDER BY 1`,
@@ -119,7 +131,7 @@ describe('Migration’lar (boş veritabanı)', () => {
   it('geri alındıktan sonra tekrar uygulanabilir', async () => {
     await ds.runMigrations({ transaction: 'each' });
     expect(await ds.showMigrations()).toBe(false);
-    expect(await tables()).toHaveLength(3);
+    expect(await tables()).toHaveLength(6);
   });
 
   it('yarıda kalmış (INVALID) index tekrar çalıştırmada yeniden oluşturulur', async () => {

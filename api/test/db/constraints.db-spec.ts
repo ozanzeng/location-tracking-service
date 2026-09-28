@@ -93,4 +93,77 @@ describe('Şema kısıtları', () => {
       '23503',
     );
   });
+
+  it('sinyal kaybı işareti sadece kapanmış girişte olabilir', async () => {
+    await insertVisit('u1', '2026-01-01T10:00:00Z');
+    await expectPgError(
+      ds.query(`UPDATE area_logs SET exit_reason = 'SIGNAL_LOST'`),
+      '23514',
+    );
+  });
+
+  describe('filo ve kiralama', () => {
+    let riders: string[];
+    const rent = (scooterId: string, riderId: string) =>
+      ds.query(
+        `INSERT INTO rentals (scooter_id, rider_id) VALUES ($1, $2) RETURNING id`,
+        [scooterId, riderId],
+      );
+
+    beforeEach(async () => {
+      await ds.query('TRUNCATE rentals, riders RESTART IDENTITY CASCADE');
+      riders = (
+        await ds.query(
+          `INSERT INTO riders (username, password_hash) VALUES ('ali', 'x'), ('veli', 'x') RETURNING id`,
+        )
+      ).map((r: { id: string }) => r.id);
+    });
+    afterAll(() =>
+      ds.query('TRUNCATE rentals, riders RESTART IDENTITY CASCADE'),
+    );
+
+    it('kullanıcı adı küçük harf ve sınırlı karakterdir; aynı ad iki kez olamaz', async () => {
+      for (const bad of ['Ali', 'a b', 'ab']) {
+        await expectPgError(
+          ds.query(
+            `INSERT INTO riders (username, password_hash) VALUES ($1, 'x')`,
+            [bad],
+          ),
+          '23514',
+        );
+      }
+      await expectPgError(
+        ds.query(
+          `INSERT INTO riders (username, password_hash) VALUES ('ali', 'x')`,
+        ),
+        '23505',
+      );
+    });
+
+    it("bir scooter aynı anda tek sürücüde, bir sürücü aynı anda tek scooter'da", async () => {
+      await rent('scooter-01', riders[0]);
+      await expectPgError(rent('scooter-01', riders[1]), '23505');
+      await expectPgError(rent('scooter-02', riders[0]), '23505');
+    });
+
+    it('biten kiralamadan sonra scooter tekrar kiralanabilir; bitiş sebebi ve zamanı birlikte', async () => {
+      await rent('scooter-01', riders[0]);
+      await expectPgError(
+        ds.query(`UPDATE rentals SET ended_at = now()`),
+        '23514',
+      );
+      await ds.query(
+        `UPDATE rentals SET ended_at = now(), end_reason = 'RETURNED'`,
+      );
+      await rent('scooter-01', riders[1]);
+    });
+
+    it('var olmayan scooter kiralanamaz; scooter kimliği konum kimliğiyle aynı biçimde', async () => {
+      await expectPgError(rent('yok', riders[0]), '23503');
+      await expectPgError(
+        ds.query(`INSERT INTO scooters (id, name) VALUES ('a b', 'x')`),
+        '23514',
+      );
+    });
+  });
 });

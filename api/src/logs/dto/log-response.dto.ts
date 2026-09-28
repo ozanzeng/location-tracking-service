@@ -1,5 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { AreaType } from '../../areas/area-type.enum.js';
+import { ExitReason } from '../../geofence/exit-reason.enum.js';
 
 export class LogResponseDto {
   @ApiProperty()
@@ -26,6 +27,14 @@ export class LogResponseDto {
     description: 'Alandan çıkış anı; kullanıcı hâlâ içerideyse null',
   })
   exitTime: string | null;
+
+  @ApiProperty({
+    enum: ExitReason,
+    nullable: true,
+    description:
+      'Çıkış nasıl kaydedildi: null ise alan dışından konum geldi; SIGNAL_LOST ise scooter uzun süre konum göndermedi ve kayıt son sinyal anıyla kapatıldı',
+  })
+  exitReason: ExitReason | null;
 }
 
 export class LogPageDto {

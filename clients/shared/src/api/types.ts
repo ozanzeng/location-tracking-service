@@ -23,6 +23,22 @@ export type HealthStatus = (typeof HealthStatus)[keyof typeof HealthStatus];
 export const DependencyStatus = { UP: 'up', DOWN: 'down' } as const;
 export type DependencyStatus = (typeof DependencyStatus)[keyof typeof DependencyStatus];
 
+/** Scooter'ın durumu; aktif kiralamadan hesaplanır (api/src/fleet/scooter-status.enum.ts). */
+export const ScooterStatus = { AVAILABLE: 'AVAILABLE', IN_USE: 'IN_USE' } as const;
+export type ScooterStatus = (typeof ScooterStatus)[keyof typeof ScooterStatus];
+
+/** Kiralamanın neden bittiği (api/src/fleet/rental-end-reason.enum.ts). */
+export const RentalEndReason = { RETURNED: 'RETURNED', SIGNAL_LOST: 'SIGNAL_LOST' } as const;
+export type RentalEndReason = (typeof RentalEndReason)[keyof typeof RentalEndReason];
+
+/** Giriş kaydının neden kapandığı; normal çıkışta null (api/src/geofence/exit-reason.enum.ts). */
+export const ExitReason = {
+  SIGNAL_LOST: 'SIGNAL_LOST',
+  AREA_CHANGED: 'AREA_CHANGED',
+  AREA_REMOVED: 'AREA_REMOVED',
+} as const;
+export type ExitReason = (typeof ExitReason)[keyof typeof ExitReason];
+
 export interface Area {
   id: string;
   name: string;
@@ -65,6 +81,82 @@ export interface LogEntry {
   areaType: AreaType;
   entryTime: string;
   exitTime: string | null;
+  /**
+   * SIGNAL_LOST: scooter uzun süre konum göndermedi, kayıt son sinyal anıyla kapatıldı.
+   * AREA_CHANGED / AREA_REMOVED: alanın şekli değişti (scooter dışarıda kaldı) ya da alan silindi.
+   */
+  exitReason: ExitReason | null;
+}
+
+export interface Scooter {
+  id: string;
+  name: string;
+  status: ScooterStatus;
+  /** Son konumun zamanı; hiç göndermediyse null. */
+  lastSeenAt: string | null;
+  /** Kimde olduğu; sadece operasyon (API anahtarı) görür. */
+  rider?: { username: string; since: string } | null;
+  /** Sürücünün kendi kiraladığı scooter mı; sadece sürücü oturumunda. */
+  mine?: boolean;
+}
+
+/** Sunucunun bir konumla ne yaptığı (api/src/fleet/device-log-result.enum.ts). */
+export const DeviceLogResult = { PROCESSED: 'PROCESSED', STALE: 'STALE' } as const;
+export type DeviceLogResult = (typeof DeviceLogResult)[keyof typeof DeviceLogResult];
+
+/** Sunucu tarafı cihaz günlüğünün bir satırı (worker'ın işlediği konum). */
+export interface DeviceLogEntry {
+  receivedAt: string;
+  processedAt: string;
+  recordedAt: string;
+  lat: number;
+  lng: number;
+  result: DeviceLogResult;
+  events: Array<{ type: EventType; area: AreaRef }>;
+  requestId?: string;
+}
+
+/** GET /scooters/:id: operasyonun scooter detayı. */
+export interface ScooterDetail {
+  id: string;
+  /** Filoda kayıtlı ve silinmemiş mi. */
+  registered: boolean;
+  name: string | null;
+  removedAt: string | null;
+  status: ScooterStatus | null;
+  rider: { username: string; since: string } | null;
+  lastLocation: { lat: number; lng: number; recordedAt: string } | null;
+  currentAreas: Array<AreaRef & { since: string }>;
+  rentals: Array<{ username: string; startedAt: string; endedAt: string | null; endReason: RentalEndReason | null }>;
+  deviceLog: DeviceLogEntry[];
+}
+
+export interface Rental {
+  scooterId: string;
+  startedAt: string;
+  endedAt: string | null;
+  endReason: RentalEndReason | null;
+}
+
+export interface Rider {
+  id: string;
+  username: string;
+}
+
+/** POST /auth/login ve /auth/register yanıtı. */
+export interface Session {
+  token: string;
+  expiresIn: number;
+  rider: Rider;
+}
+
+/** Filo duyurusunun türü (api/src/fleet/fleet-change.enum.ts). */
+export const FleetChange = { SCOOTERS: 'scooters', RENTALS: 'rentals' } as const;
+export type FleetChange = (typeof FleetChange)[keyof typeof FleetChange];
+
+export interface FleetChanged {
+  change: FleetChange;
+  scooterId: string;
 }
 
 export interface LocationPoint {

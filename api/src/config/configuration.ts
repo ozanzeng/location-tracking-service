@@ -67,6 +67,13 @@ export interface AppConfig {
     maxStalledCount: number;
     /** Kapanışta aktif işin bitmesi için beklenen en uzun süre (ms); sonra iş başka worker'a kalır. */
     shutdownGraceMs: number;
+    /**
+     * Bu kadar süre konum göndermeyen scooter'ın sinyali kesilmiş sayılır (ms): açık giriş
+     * kayıtları son sinyal anıyla kapatılır, kiralaması biter ve scooter boşa çıkar. 0 kapatır.
+     */
+    signalLossTimeoutMs: number;
+    /** Sinyali kesilen scooter'ların aranma aralığı (ms). */
+    signalLossCheckMs: number;
   };
   realtime: {
     enabled: boolean;
@@ -81,11 +88,12 @@ export interface AppConfig {
     /** Tam yetkili API anahtarları. Boşsa kimlik doğrulama kapalıdır (yerel geliştirme). */
     apiKeys: string[];
     /**
-     * Sadece konum gönderebilen anahtarlar (sürücü uygulaması / cihaz): konum gönderir,
-     * alan listesini okur, kendi kullanıcı odasına abone olur. Loglar, alan oluşturma ve
-     * tüm filonun canlı yayını tam yetki ister.
+     * Sürücü oturumunun geçerlilik süresi (saniye). Sürücüler kullanıcı adı ve şifreyle giriş
+     * yapar; oturum bu süre sonunda düşer ve yeniden giriş gerekir.
      */
-    ingestApiKeys: string[];
+    riderSessionTtlSeconds: number;
+    /** Bir kullanıcı adına 15 dakikada izin verilen başarısız giriş; fazlası 429. 0 kapatır. */
+    loginMaxAttempts: number;
     /** İzin verilen CORS origin'leri; ['*'] hepsine izin verir, [] kapatır. */
     corsOrigins: string[];
     /** Kullanıcı başına dakikada kabul edilen konum sayısı; 0 kapatır. */
@@ -100,6 +108,13 @@ export interface AppConfig {
   observability: {
     /** Worker'ın /metrics için dinlediği port; 0 kapatır. */
     workerMetricsPort: number;
+    /**
+     * Scooter başına sunucuda tutulan son işlenmiş konum sayısı (cihaz günlüğü, operasyon
+     * ekranı için); 0 kapatır.
+     */
+    deviceLogSize: number;
+    /** Cihaz günlüğünün son konumdan sonra saklanma süresi (saniye). */
+    deviceLogTtlSeconds: number;
   };
 }
 
@@ -175,24 +190,19 @@ export function loadConfig(
   }
 
   const apiKeys = list('API_KEYS');
-  const ingestApiKeys = list('INGEST_API_KEYS');
   if (options.apiServer) {
     if (production && apiKeys.length === 0) {
       problems.push(
         'API_KEYS production ortamında zorunlu (virgülle ayrılmış bir veya daha fazla anahtar)',
       );
     }
-    if (ingestApiKeys.length > 0 && apiKeys.length === 0) {
+    // Eski kurulumdan kalan ayar sessizce yok sayılmasın: sürücü anahtarı artık yok.
+    if (list('INGEST_API_KEYS').length > 0) {
       problems.push(
-        'INGEST_API_KEYS verildiyse API_KEYS de verilmeli (API_KEYS boşken doğrulama kapalıdır)',
+        'INGEST_API_KEYS kaldırıldı: sürücüler artık kullanıcı adı ve şifreyle giriş yapıyor (README, "Scooterlar ve sürücü hesapları"). Ayarı silin.',
       );
     }
-    if (ingestApiKeys.some((key) => apiKeys.includes(key))) {
-      problems.push(
-        'Aynı anahtar hem API_KEYS hem INGEST_API_KEYS içinde olamaz',
-      );
-    }
-    const weak = [...apiKeys, ...ingestApiKeys].filter(
+    const weak = apiKeys.filter(
       (key) => key.length < MIN_PRODUCTION_KEY_LENGTH,
     );
     if (production && weak.length > 0) {
@@ -294,6 +304,15 @@ export function loadConfig(
       maxStalledCount: int('WORKER_MAX_STALLED_COUNT', 3, 1, 100),
       // docker stop 10 sn sonra süreci öldürür; ondan önce bitsin.
       shutdownGraceMs: int('WORKER_SHUTDOWN_GRACE_MS', 8000, 0, 600_000),
+      // Cihaz 5 sn'de bir gönderir; 10 dk sessizlik kısa bir tünel ya da ağ kopukluğundan
+      // ayırt edilecek kadar uzun. Çevrimdışı biriken konumlar sonradan gelirse kaybolmaz.
+      signalLossTimeoutMs: int(
+        'SIGNAL_LOSS_TIMEOUT_MS',
+        600_000,
+        0,
+        86_400_000,
+      ),
+      signalLossCheckMs: int('SIGNAL_LOSS_CHECK_MS', 30_000, 100, 3_600_000),
     },
     realtime: {
       enabled: env.REALTIME_ENABLED !== 'false',
@@ -304,7 +323,10 @@ export function loadConfig(
     },
     security: {
       apiKeys,
-      ingestApiKeys,
+      riderSessionTtlSeconds:
+        int('RIDER_SESSION_TTL_HOURS', 24, 1, 24 * 90) * 3600,
+      // Kaba kuvvetle şifre denemesine karşı; kullanıcı adı başına, IP'den bağımsız.
+      loginMaxAttempts: int('LOGIN_MAX_ATTEMPTS', 10, 0, 1000),
       corsOrigins,
       // 5 sn'de bir gönderen cihaz dakikada 12 istek atar; 5 kat pay bırakıldı. 0 kapatır.
       userRateLimitPerMinute: int('RATE_LIMIT_USER_PER_MIN', 60, 0, 100_000),
@@ -315,6 +337,9 @@ export function loadConfig(
     },
     observability: {
       workerMetricsPort: int('WORKER_METRICS_PORT', 9100, 0, 65_535),
+      // 5 sn'de bir gönderen cihaz için ~4 dakikalık geçmiş; 5.000 scooter ~40 MB.
+      deviceLogSize: int('DEVICE_LOG_SIZE', 50, 0, 1000),
+      deviceLogTtlSeconds: int('DEVICE_LOG_TTL_HOURS', 24, 1, 24 * 30) * 3600,
     },
   };
 

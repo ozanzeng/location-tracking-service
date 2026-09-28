@@ -7,7 +7,7 @@ import { CorsIoAdapter } from './realtime/cors-io.adapter.js';
 import { APP_CONFIG, type AppConfig } from './config/configuration.js';
 import { JSON_BODY_LIMIT } from './config/limits.js';
 import { collectProcessMetrics } from './metrics/metrics.js';
-import { API_KEY_HEADER } from './security/api-key.guard.js';
+import { API_KEY_HEADER } from './security/auth.guard.js';
 
 /** main.ts ve e2e testleri aynı ayarları kullansın diye ortak kurulum. */
 export function setupApp(app: INestApplication): void {
@@ -49,6 +49,8 @@ export function setupApp(app: INestApplication): void {
         { type: 'apiKey', in: 'header', name: API_KEY_HEADER },
         'api-key',
       )
+      // Sürücü oturumu: POST /auth/login'in döndürdüğü token.
+      .addBearerAuth({ type: 'http', scheme: 'bearer' }, 'rider')
       .build(),
   );
   SwaggerModule.setup('docs', app, document);

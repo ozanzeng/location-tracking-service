@@ -29,4 +29,9 @@ export const STOP_HIT_PX = 14;
 export const SAME_STOP_METERS = 5;
 
 export const ROADS_URL = '/roads-kadikoy.json';
-export const SCOOTER_ID_KEY = 'driver.scooterId';
+
+/** Scooter bırakılırken bekleyen konumların gönderilmesi için en fazla bu kadar beklenir. */
+export const OUTBOX_DRAIN_TIMEOUT_MS = 10_000;
+
+/** Sürücü oturumunun tarayıcıda saklandığı anahtar (localStorage). */
+export const SESSION_STORAGE_KEY = 'rider-session';

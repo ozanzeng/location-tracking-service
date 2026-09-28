@@ -1,6 +1,7 @@
 /**
- * API sözleşmesinin sabit sınırları. Ortama göre değişmezler (onlar AppConfig'te, env ile):
- * değiştirmek istemcilerin gördüğü davranışı değiştirir, bu yüzden kodda ve tek yerde durur.
+ * Kodda sabit duran sınırlar ve değerler; ortama göre değişmezler (onlar AppConfig'te, env ile).
+ * Çoğu API sözleşmesinin parçasıdır: değiştirmek istemcilerin gördüğü davranışı değiştirir.
+ * Sonda iç işleyişin sabitleri (şifre özeti, filo listesi, sinyal kaybı taraması) var.
  */
 
 /** userId: opak kimlik; harf, rakam ve _ . : - */
@@ -54,3 +55,45 @@ export const MAX_LOG_ID = 9_223_372_036_854_775_807n;
 
 /** Gelen x-request-id bu biçimde değilse yok sayılır ve yenisi üretilir. */
 export const REQUEST_ID_PATTERN = /^[A-Za-z0-9._-]{1,128}$/;
+
+/** Scooter kimliği konumlardaki userId'dir (aynı biçim ve uzunluk); adı operasyon için. */
+export const SCOOTER_NAME_MAX_LENGTH = 80;
+
+/**
+ * Sürücü kullanıcı adı: küçük harfle saklanır ("Ali" ile "ali" aynı hesap). Veritabanında
+ * aynı kural CHECK kısıtı olarak da var (riders_username_format).
+ */
+export const USERNAME_PATTERN = /^[a-z0-9_.-]{3,32}$/;
+export const USERNAME_MIN_LENGTH = 3;
+export const USERNAME_MAX_LENGTH = 32;
+/** Şifre uzunluğu; üst sınır hash hesabının istek başına maliyetini sınırlar. */
+export const PASSWORD_MIN_LENGTH = 8;
+export const PASSWORD_MAX_LENGTH = 128;
+
+/** Başarısız giriş denemeleri bu pencerede sayılır (bkz. LOGIN_MAX_ATTEMPTS). */
+export const LOGIN_WINDOW_SECONDS = 15 * 60;
+
+/**
+ * Sürücünün aktif kiralaması Redis'te bu kadar saniye önbellekte tutulur: konum isteği her
+ * seferinde veritabanına gitmesin. Kiralama başlarken ve biterken önbellek hemen güncellenir;
+ * süre, silme bir sebeple kaçarsa eski bilginin en fazla ne kadar yaşayacağıdır.
+ */
+export const RENTAL_CACHE_TTL_SECONDS = 30;
+
+/**
+ * Şifre özeti (Argon2id), OWASP'ın ilk seçeneği: 19 MiB bellek, 2 tur, 1 iş parçacığı. Artırılırsa
+ * eski özetler yine doğrulanır, sürücü giriş yapınca yenilenir (riders/password.ts).
+ */
+export const PASSWORD_HASH = {
+  memoryKib: 19_456,
+  passes: 2,
+  parallelism: 1,
+  tagLength: 32,
+  saltLength: 16,
+} as const;
+
+/** Bellekteki kayıtlı scooter listesi, filo duyurusu kaçarsa en geç bu aralıkla yenilenir. */
+export const SCOOTER_REGISTRY_REFRESH_MS = 60_000;
+
+/** Sinyal kaybı taramasında bir grupta ele alınan en fazla kullanıcı. */
+export const SIGNAL_LOSS_BATCH = 500;

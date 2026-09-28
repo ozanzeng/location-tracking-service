@@ -145,6 +145,17 @@
   font-weight: 700;
 }
 
+.badge--busy {
+  background: #fdf1d6;
+  color: #7a5200;
+}
+
+.badge--warn {
+  margin-left: 0.5rem;
+  background: #fbe3e6;
+  color: #a3172a;
+}
+
 .load-more {
   display: block;
   margin: 1rem auto 0;
@@ -267,4 +278,187 @@
 .type:has(input:focus-visible) {
   outline: 3px solid var(--focus);
   outline-offset: 1px;
+}
+
+/* Filo */
+
+.fleet__summary {
+  margin: 1.25rem auto 0.5rem;
+}
+
+.fleet__id {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.plate {
+  display: inline-block;
+  padding: 0.05rem 0.45rem;
+  border: 1.5px solid var(--asphalt);
+  border-radius: 4px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
+
+.fleet__actions {
+  text-align: right;
+}
+
+.fleet__actions .btn {
+  min-height: 2rem;
+  padding: 0.2rem 0.75rem;
+}
+
+.btn--danger {
+  border-color: #a3172a;
+  background: #a3172a;
+  color: #fff;
+}
+
+/* Alan listesi: düzenle / sil */
+
+.area-list li {
+  grid-template-columns: auto 1fr auto;
+  padding: 0.35rem 0.4rem;
+  border-radius: 6px;
+}
+
+.area-list li > span:nth-child(2) {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.area-list li[aria-current='true'] {
+  background: #eaf1fa;
+  outline: 1.5px solid var(--sign-blue);
+}
+
+.area-list__actions,
+.area-list__confirm {
+  display: flex;
+  gap: 0.35rem;
+}
+
+.area-list .btn {
+  min-height: 1.9rem;
+  padding: 0.15rem 0.6rem;
+  font-size: var(--step--1);
+}
+
+/* Scooter detay paneli: sağdan açılır, tablo arkada kullanılabilir kalır */
+
+.drawer {
+  position: fixed;
+  top: 3.5rem;
+  right: 0;
+  bottom: 0;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  width: min(100%, 26rem);
+  padding: 1.25rem 1.25rem 2rem;
+  overflow-y: auto;
+  background: var(--paper);
+  border-left: 1px solid var(--line);
+  box-shadow: -8px 0 24px rgb(43 47 54 / 0.12);
+}
+
+.drawer__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.drawer__head h2 {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0 0 0.5rem;
+  font-size: var(--step-1);
+}
+
+.drawer__head h2:focus {
+  outline: none;
+}
+
+.drawer__name {
+  font-weight: 600;
+  color: var(--asphalt-soft);
+}
+
+.drawer__close {
+  min-width: 2.25rem;
+  min-height: 2.25rem;
+  border: 1.5px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  font-size: var(--step-2);
+  line-height: 1;
+  cursor: pointer;
+}
+
+.drawer__section h3 {
+  margin: 0 0 0.4rem;
+  font-size: var(--step-0);
+  font-weight: 800;
+}
+
+.drawer__section p {
+  margin: 0 0 0.5rem;
+}
+
+.device-feed,
+.rental-list {
+  display: flex;
+  flex-direction: column;
+  margin: 0.5rem 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--step--1);
+}
+
+.device-feed li {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.6rem;
+  padding: 0.35rem 0 0.35rem 0.6rem;
+  border-left: 3px solid #2f9e5b;
+}
+
+.device-feed li[data-result='STALE'] {
+  border-left-color: var(--caution);
+}
+
+.device-feed li > span {
+  display: flex;
+  flex-direction: column;
+}
+
+.device-feed small,
+.device-feed time {
+  color: var(--asphalt-soft);
+}
+
+.device-feed__event {
+  color: var(--sign-blue);
+}
+
+.rental-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.35rem 0;
+  border-bottom: 1px solid var(--line);
+}
+
+@media (max-width: 760px) {
+  .drawer {
+    width: 100%;
+  }
 }

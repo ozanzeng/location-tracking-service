@@ -12,6 +12,8 @@ import type {
   LocationPoint,
   UserLocation,
 } from '../queue/location-job.js';
+import { DeviceLog, type DeviceLogEntry } from '../fleet/device-log.js';
+import { DeviceLogResult } from '../fleet/device-log-result.enum.js';
 import { RealtimePublisher } from '../realtime/realtime.publisher.js';
 import { throttledErrorLogger } from '../common/redis/create-redis.js';
 import { GeofenceService } from './geofence.service.js';
@@ -36,6 +38,7 @@ export class LocationProcessor {
   constructor(
     private readonly geofence: GeofenceService,
     private readonly publisher: RealtimePublisher,
+    private readonly deviceLog: DeviceLog,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
   ) {}
 
@@ -47,6 +50,9 @@ export class LocationProcessor {
     const points = jobPoints(job.data);
     let processed = 0;
     let events = 0;
+    const receivedAt = new Date(job.timestamp).toISOString();
+    const requestId = 'requestId' in job.data ? job.data.requestId : undefined;
+    const log: DeviceLogEntry[] = [];
     // Noktalar zamana göre sıralı; sırayla işlenmeli (bkz. LocationJobData).
     for (const point of points) {
       const stopTimer = jobDuration.startTimer();
@@ -59,6 +65,22 @@ export class LocationProcessor {
         }),
       );
       stopTimer({ result: result.status });
+      log.push({
+        receivedAt,
+        processedAt: new Date().toISOString(),
+        recordedAt: point.recordedAt,
+        lat: point.lat,
+        lng: point.lng,
+        result:
+          result.status === ProcessStatus.STALE
+            ? DeviceLogResult.STALE
+            : DeviceLogResult.PROCESSED,
+        events:
+          result.status === ProcessStatus.STALE
+            ? []
+            : result.events.map((e) => ({ type: e.eventType, area: e.area })),
+        requestId,
+      });
       if (result.status === ProcessStatus.STALE) continue;
 
       processed++;
@@ -71,6 +93,8 @@ export class LocationProcessor {
         events: result.events,
       });
     }
+    // İş başına tek Redis isteği; yazılamazsa konum işleme etkilenmez.
+    await this.deviceLog.record(userId, log);
     return { processed, stale: points.length - processed, events };
   }
 

@@ -18,11 +18,18 @@ x-api-env: &api-env
   REDIS_URL: redis://redis:6379
   # Kullanıcı şeritleri: aynı anda en fazla bu kadar iş işlenir. API ve worker'da aynı olmalı.
   QUEUE_LANES: 64
-  # Yerel demo anahtarları; gerçek ortamda secret olarak verilmeli.
-  # Tam yetki (operasyon, betikler) ve sadece konum gönderme (sürücü uygulaması).
+  # Yerel demo anahtarı (operasyon, betikler, mobil backend); gerçek ortamda secret olarak
+  # verilmeli. Sürücüler anahtar kullanmaz: kullanıcı adı ve şifreyle giriş yapar.
   API_KEYS: ${API_KEY:-dev-api-key}
-  INGEST_API_KEYS: ${DRIVER_API_KEY:-dev-driver-key}
   RATE_LIMIT_USER_PER_MIN: ${RATE_LIMIT_USER_PER_MIN:-60}
+  # Proje kökündeki .env ya da kabuk ortamıyla değiştirilebilir; boşsa koddaki varsayılan
+  # geçerli (api/src/config/configuration.ts, açıklamalar api/.env.example'da).
+  RIDER_SESSION_TTL_HOURS: ${RIDER_SESSION_TTL_HOURS:-}
+  LOGIN_MAX_ATTEMPTS: ${LOGIN_MAX_ATTEMPTS:-}
+  SIGNAL_LOSS_TIMEOUT_MS: ${SIGNAL_LOSS_TIMEOUT_MS:-}
+  SIGNAL_LOSS_CHECK_MS: ${SIGNAL_LOSS_CHECK_MS:-}
+  DEVICE_LOG_SIZE: ${DEVICE_LOG_SIZE:-}
+  DEVICE_LOG_TTL_HOURS: ${DEVICE_LOG_TTL_HOURS:-}
 
 services:
   postgres:
@@ -130,8 +137,9 @@ services:
       args:
         APP: driver
     environment:
-      # Herkese açık uygulama: sadece konum gönderip alanları okuyabilen anahtar.
-      API_KEY: ${DRIVER_API_KEY:-dev-driver-key}
+      # Herkese açık uygulama: anahtar eklenmez (nginx boş başlığı iletmez). Sürücü kendi
+      # hesabıyla giriş yapar; oturum token'ı tarayıcıdan Authorization başlığıyla gider.
+      API_KEY: ""
     ports:
       - "${DRIVER_PORT:-8081}:80"
     depends_on:

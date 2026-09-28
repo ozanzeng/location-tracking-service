@@ -8,12 +8,19 @@ import { scramSha256Verifier } from './scram.js';
  * bağlantı yuvalarını da tüketirdi. Yeni bir tablo eklenirse buraya da eklenmeli.
  */
 export const APP_TABLE_PRIVILEGES: Record<string, string[]> = {
-  // Alan oluşturma ve listeleme; güncelleme/silme API'de yok.
-  areas: ['SELECT', 'INSERT'],
+  // Alan oluşturma, listeleme, düzenleme ve silme (deleted_at güncellemesi; yumuşak silme).
+  areas: ['SELECT', 'INSERT', 'UPDATE'],
   // Giriş (INSERT) ve çıkış (UPDATE exit_time).
   area_logs: ['SELECT', 'INSERT', 'UPDATE'],
   // Son konum upsert'i.
   user_last_location: ['SELECT', 'INSERT', 'UPDATE'],
+  // Filo: ekleme ve silme (deleted_at güncellemesi; yumuşak silme, DELETE yok).
+  scooters: ['SELECT', 'INSERT', 'UPDATE'],
+  // Üyelik ve giriş; girişte eski yöntemle özetlenmiş şifre yenilenir (sadece o kolon).
+  // Kullanıcı adı değiştirme ve hesap silme API'de yok.
+  riders: ['SELECT', 'INSERT', 'UPDATE (password_hash)'],
+  // Kiralama başlatma (INSERT) ve bitirme (UPDATE ended_at).
+  rentals: ['SELECT', 'INSERT', 'UPDATE'],
 };
 
 const ROLE_NAME = /^[a-z_][a-z0-9_]{0,62}$/;
@@ -56,7 +63,7 @@ export async function ensureAppRole(
     await run('REVOKE ALL ON TABLE %I FROM %I', table, role);
     await run(`GRANT ${privileges.join(', ')} ON TABLE %I TO %I`, table, role);
   }
-  // area_logs.id bigserial: yeni kayıt için dizinin nextval'i.
+  // area_logs.id ve rentals.id bigserial: yeni kayıt için dizilerin nextval'i.
   await run('GRANT USAGE ON ALL SEQUENCES IN SCHEMA public TO %I', role);
   return exists ? 'güncellendi' : 'oluşturuldu';
 }

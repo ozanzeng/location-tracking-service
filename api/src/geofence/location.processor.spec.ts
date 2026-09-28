@@ -1,3 +1,4 @@
+import type { DeviceLog } from '../fleet/device-log.js';
 import type { Job } from 'bullmq';
 import { AreaType } from '../areas/area-type.enum.js';
 import { type AppConfig, loadConfig } from '../config/configuration.js';
@@ -35,12 +36,14 @@ const setup = (worker: Partial<AppConfig['worker']> = {}) => {
     }),
   } satisfies Partial<GeofenceService>;
   const publish = vi.fn().mockResolvedValue(undefined);
+  const record = vi.fn<DeviceLog['record']>().mockResolvedValue(undefined);
   const processor = new LocationProcessor(
     geofence as unknown as GeofenceService,
     { publish } as unknown as RealtimePublisher,
+    { record } as unknown as DeviceLog,
     { ...base, worker: { ...base.worker, ...worker } },
   );
-  return { processor, geofence, publish, order };
+  return { processor, geofence, publish, record, order };
 };
 
 const makeJob = (data: object) =>
@@ -74,6 +77,32 @@ describe('LocationProcessor.process', () => {
       't1',
       't3',
     ]);
+  });
+
+  it('cihaz günlüğüne işteki her nokta, sonucu ve olaylarıyla tek seferde yazılır (eskiler dahil)', async () => {
+    const { processor, record } = setup();
+    await processor.process(
+      makeJob({ userId: 'u1', points, requestId: 'r-1' }),
+    );
+    expect(record).toHaveBeenCalledTimes(1);
+    const [scooterId, entries] = record.mock.calls[0];
+    expect(scooterId).toBe('u1');
+    expect(
+      entries.map((e) => [
+        e.recordedAt,
+        e.result,
+        e.events.length,
+        e.requestId,
+      ]),
+    ).toEqual([
+      ['t1', 'PROCESSED', 1, 'r-1'],
+      ['t2', 'STALE', 0, 'r-1'],
+      ['t3', 'PROCESSED', 1, 'r-1'],
+    ]);
+    expect(entries[0].events[0]).toEqual({
+      type: AreaEventType.ENTER,
+      area: { id: 'a', name: 'A', type: AreaType.PARKING },
+    });
   });
 
   it('geçici hatada noktayı işin içinde yeniden dener, işlenmiş noktaları tekrarlamaz', async () => {

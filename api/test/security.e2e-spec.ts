@@ -7,12 +7,13 @@ import { LocationLanes } from '../src/queue/location-lanes.js';
 import {
   createTestApp,
   INSIDE,
+  registerRider,
+  rentScooter,
   resetState,
   waitForQueueDrain,
 } from './helpers.js';
 
 const KEY = 'test-key';
-const DRIVER_KEY = 'test-driver-key';
 // Rate limit sayaçları Redis'te dakikalık tutulur; koşular birbirini etkilemesin.
 const run = Date.now().toString(36);
 /**
@@ -46,7 +47,6 @@ describe('Güvenlik ve gözlemlenebilirlik (e2e)', () => {
         security: {
           ...c.security,
           apiKeys: [KEY],
-          ingestApiKeys: [DRIVER_KEY],
           userRateLimitPerMinute: 3,
         },
       }),
@@ -74,30 +74,70 @@ describe('Güvenlik ve gözlemlenebilirlik (e2e)', () => {
         .expect(200);
     });
 
-    it('sürücü anahtarı konum gönderip alanları okur, başka hiçbir şeye erişemez', async () => {
+    it('sürücü oturumu kiraladığı scooter için konum gönderir, alanları ve filoyu okur; başka hiçbir şeye erişemez', async () => {
       const server = app.getHttpServer();
-      await post('/locations', location(`drv-${run}`), DRIVER_KEY).expect(202);
-      await post(
-        '/locations/batch',
-        { locations: [location(`drv-${run}`)] },
-        DRIVER_KEY,
-      ).expect(202);
+      const token = await registerRider(app, `sec-${run}`);
+      await rentScooter(app, token, 'scooter-01').expect(201);
+      const bearer = `Bearer ${token}`;
       await request(server)
-        .get('/areas')
-        .set('x-api-key', DRIVER_KEY)
-        .expect(200);
+        .post('/locations')
+        .set('authorization', bearer)
+        .send(location('scooter-01'))
+        .expect(202);
+      await request(server)
+        .post('/locations/batch')
+        .set('authorization', bearer)
+        .send({ locations: [location('scooter-01')] })
+        .expect(202);
+      for (const path of ['/areas', '/scooters']) {
+        await request(server)
+          .get(path)
+          .set('authorization', bearer)
+          .expect(200);
+      }
 
       for (const path of ['/logs', '/locations/latest']) {
         await request(server)
           .get(path)
-          .set('x-api-key', DRIVER_KEY)
+          .set('authorization', bearer)
           .expect(403);
       }
-      await post(
-        '/areas',
-        { name: 'x', type: 'PARKING', geometry: {} },
-        DRIVER_KEY,
-      ).expect(403);
+      await request(server)
+        .post('/areas')
+        .set('authorization', bearer)
+        .send({ name: 'x', type: 'PARKING', geometry: {} })
+        .expect(403);
+      await request(server)
+        .post('/scooters')
+        .set('authorization', bearer)
+        .send({ id: 'x' })
+        .expect(403);
+      await request(server)
+        .delete('/scooters/scooter-02')
+        .set('authorization', bearer)
+        .expect(403);
+      const areaId = '00000000-0000-4000-8000-000000000000';
+      await request(server)
+        .patch(`/areas/${areaId}`)
+        .set('authorization', bearer)
+        .send({ name: 'x' })
+        .expect(403);
+      await request(server)
+        .delete(`/areas/${areaId}`)
+        .set('authorization', bearer)
+        .expect(403);
+      await request(server)
+        .post('/rentals/current/end')
+        .set('authorization', bearer)
+        .expect(200);
+    });
+
+    it('sürücü uç noktaları API anahtarıyla çağrılamaz (kimin adına olduğu belli olmalı)', async () => {
+      await request(app.getHttpServer())
+        .post('/rentals')
+        .set('x-api-key', KEY)
+        .send({ scooterId: 'scooter-01' })
+        .expect(401);
     });
 
     it('health ve metrics anahtar istemez', async () => {

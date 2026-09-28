@@ -36,7 +36,7 @@ describe('Uygulama rolü (en az yetki)', () => {
   beforeAll(async () => {
     owner = await connect();
     await owner.query(
-      'TRUNCATE area_logs, user_last_location, areas RESTART IDENTITY CASCADE',
+      'TRUNCATE area_logs, user_last_location, areas, rentals, riders RESTART IDENTITY CASCADE',
     );
     // Önceki (düzeltme öncesi) çalıştırmalardan kalmış kayıtlar sonucu etkilemesin.
     await forgetStats(PASSWORD);
@@ -49,8 +49,9 @@ describe('Uygulama rolü (en az yetki)', () => {
   afterAll(async () => {
     await app?.destroy();
     await owner.query(
-      'TRUNCATE area_logs, user_last_location, areas RESTART IDENTITY CASCADE',
+      'TRUNCATE area_logs, user_last_location, areas, rentals, riders RESTART IDENTITY CASCADE',
     );
+    await owner.query("DELETE FROM scooters WHERE id = 'rol-scooter'");
     await owner.destroy();
   });
 
@@ -153,11 +154,55 @@ describe('Uygulama rolü (en az yetki)', () => {
     expect(log.exit_time).not.toBeNull();
   });
 
+  it('filo, kiralama ve alan düzenlemeyi yapar: üyelik, kiralama (satır kilidiyle), bitirme, scooter ekleme ve yumuşak silme, sinyal kaybı', async () => {
+    const [{ id: riderId }] = await app.query(
+      `INSERT INTO riders (username, password_hash) VALUES ('rol-surucu', 'x') RETURNING id`,
+    );
+    await app.query(
+      `INSERT INTO scooters (id, name) VALUES ('rol-scooter', 'Rol') ON CONFLICT (id) DO UPDATE SET deleted_at = NULL`,
+    );
+    await app.transaction(async (m) => {
+      await m.query(
+        `SELECT id FROM scooters WHERE id = 'rol-scooter' AND deleted_at IS NULL FOR SHARE`,
+      );
+      await m.query(
+        `INSERT INTO rentals (scooter_id, rider_id) VALUES ('rol-scooter', $1)`,
+        [riderId],
+      );
+    });
+    await app.query(
+      `UPDATE rentals SET ended_at = now(), end_reason = 'RETURNED' WHERE rider_id = $1 AND ended_at IS NULL`,
+      [riderId],
+    );
+    await app.transaction(async (m) => {
+      await m.query(
+        `SELECT id FROM scooters WHERE id = 'rol-scooter' FOR UPDATE`,
+      );
+      await m.query(
+        `UPDATE scooters SET deleted_at = now() WHERE id = 'rol-scooter'`,
+      );
+    });
+    await app.query(
+      `UPDATE area_logs SET exit_reason = 'SIGNAL_LOST' WHERE false`,
+    );
+    // Alan düzenleme ve yumuşak silme.
+    await app.query(
+      `UPDATE areas SET name = name, deleted_at = NULL WHERE false`,
+    );
+    // Girişte eski özet yenilenir: sadece şifre kolonu güncellenebilir.
+    await app.query(`UPDATE riders SET password_hash = 'yeni' WHERE id = $1`, [
+      riderId,
+    ]);
+  });
+
   it.each([
     ['alan silme', 'DELETE FROM areas'],
+    ['scooter silme (sadece yumuşak silme var)', 'DELETE FROM scooters'],
+    ['kiralama geçmişi silme', 'DELETE FROM rentals'],
+    ['sürücü hesabı silme', 'DELETE FROM riders'],
+    ['sürücü kullanıcı adı değiştirme', "UPDATE riders SET username = 'x'"],
     ['log silme', 'DELETE FROM area_logs'],
     ['tablo boşaltma', 'TRUNCATE area_logs'],
-    ['alan güncelleme', "UPDATE areas SET name = 'x'"],
     ['tablo oluşturma', 'CREATE TABLE sizinti (id int)'],
     ['sunucuda komut çalıştırma', "COPY areas TO PROGRAM 'true'"],
   ])('%s yetkisi yok', async (_label, sql) => {

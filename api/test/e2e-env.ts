@@ -9,3 +9,6 @@ process.env.REALTIME_ENABLED = 'false';
 // bunlar security.e2e-spec.ts içinde config ezilerek ayrıca test edilir.
 delete process.env.API_KEYS;
 process.env.RATE_LIMIT_USER_PER_MIN = '0';
+// Test verisi sabit ve geçmiş bir tarihte (helpers.at): sinyal kaybı taraması testlerin
+// ortasında açık girişleri kapatmasın; signal-loss.e2e-spec.ts taramayı elle çağırır.
+process.env.SIGNAL_LOSS_TIMEOUT_MS = '0';

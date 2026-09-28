@@ -2,10 +2,16 @@ import type { AddressInfo } from 'node:net';
 import type { INestApplication } from '@nestjs/common';
 import { io, type Socket } from 'socket.io-client';
 import request from 'supertest';
-import { createTestApp, INSIDE, MODA_SQUARE, resetState } from './helpers.js';
+import {
+  createTestApp,
+  INSIDE,
+  MODA_SQUARE,
+  registerRider,
+  rentScooter,
+  resetState,
+} from './helpers.js';
 
 const KEY = 'ws-key';
-const DRIVER_KEY = 'ws-driver-key';
 
 describe('Canlı yayın (e2e)', () => {
   let app: INestApplication;
@@ -21,6 +27,18 @@ describe('Canlı yayın (e2e)', () => {
     sockets.push(socket);
     return socket;
   };
+  /** Sürücü oturumuyla bağlantı (sürücü uygulaması gibi token el sıkışmada gider). */
+  const connectRider = (token: string) => {
+    const socket = io(url, {
+      transports: ['websocket'],
+      reconnection: false,
+      auth: { token },
+    });
+    sockets.push(socket);
+    return socket;
+  };
+  const connected = (socket: Socket) =>
+    new Promise<void>((resolve) => socket.on('connect', () => resolve()));
 
   beforeAll(async () => {
     app = await createTestApp({
@@ -30,7 +48,6 @@ describe('Canlı yayın (e2e)', () => {
         security: {
           ...c.security,
           apiKeys: [KEY],
-          ingestApiKeys: [DRIVER_KEY],
         },
       }),
     });
@@ -51,32 +68,45 @@ describe('Canlı yayın (e2e)', () => {
     expect(reason).toBe('io server disconnect');
   });
 
-  it('sürücü anahtarı kendi kullanıcı odasına girer, tüm filonun yayınına giremez', async () => {
-    const socket = connect(DRIVER_KEY);
-    await new Promise<void>((resolve) => socket.on('connect', () => resolve()));
-    expect(await socket.emitWithAck('subscribe', { userId: 'drv-1' })).toEqual({
-      ok: true,
-    });
+  it('sürücü sadece kiraladığı scooter odasına girer, tüm filonun yayınına giremez', async () => {
+    const token = await registerRider(app, 'ws-surucu-1');
+    await rentScooter(app, token, 'scooter-01').expect(201);
+    const socket = connectRider(token);
+    await connected(socket);
+    expect(
+      await socket.emitWithAck('subscribe', { userId: 'scooter-01' }),
+    ).toEqual({ ok: true });
+    expect(
+      await socket.emitWithAck('subscribe', { userId: 'scooter-02' }),
+    ).toEqual({ ok: false, error: expect.stringMatching(/size kiralı değil/) });
     expect(await socket.emitWithAck('subscribe', { monitor: true })).toEqual({
       ok: false,
-      error: expect.stringMatching(/tam yetkili/),
+      error: expect.stringMatching(/API anahtarı ister/),
     });
 
     const ops = connect(KEY);
-    await new Promise<void>((resolve) => ops.on('connect', () => resolve()));
+    await connected(ops);
     expect(await ops.emitWithAck('subscribe', { monitor: true })).toEqual({
       ok: true,
     });
   });
 
-  it('sürücü bağlantısı aynı anda tek kullanıcı odasında durur; tam yetkili bağlantı birden çok odada', async () => {
-    const connected = (socket: Socket) =>
-      new Promise<void>((resolve) => socket.on('connect', () => resolve()));
-    const driver = connect(DRIVER_KEY);
+  it("geçersiz sürücü token'ıyla bağlantı kapatılır", async () => {
+    const socket = connectRider('gecersiz-token-1234567890');
+    const reason = await new Promise<string>((resolve) =>
+      socket.on('disconnect', resolve),
+    );
+    expect(reason).toBe('io server disconnect');
+  });
+
+  it("sürücü kiraladığı scooter'ın konumunu alır, başkasınınkini almaz; API anahtarı birden çok odada", async () => {
+    const token = await registerRider(app, 'ws-surucu-2');
+    await rentScooter(app, token, 'scooter-02').expect(201);
+    const driver = connectRider(token);
     const ops = connect(KEY);
     await Promise.all([connected(driver), connected(ops)]);
-    for (const userId of ['room-a', 'room-b']) {
-      await driver.emitWithAck('subscribe', { userId });
+    await driver.emitWithAck('subscribe', { userId: 'scooter-02' });
+    for (const userId of ['room-a', 'scooter-02']) {
       await ops.emitWithAck('subscribe', { userId });
     }
 
@@ -99,32 +129,44 @@ describe('Canlı yayın (e2e)', () => {
         })
         .expect(202);
     await send('room-a', 2);
-    await send('room-b', 2);
+    await send('scooter-02', 2);
     await vi.waitFor(() => {
-      expect(new Set(opsSaw)).toEqual(new Set(['room-a', 'room-b']));
-      expect(driverSaw).toContain('room-b');
+      expect(new Set(opsSaw)).toEqual(new Set(['room-a', 'scooter-02']));
+      expect(driverSaw).toContain('scooter-02');
     });
 
-    // İşaret: room-b'ye bir konum daha. Aynı soketteki mesajlar sırayla gelir; sürücü room-a'yı
-    // alsaydı (ops onu çoktan aldı) o mesaj işaretten önce ulaşmış olurdu.
-    await send('room-b', 1);
+    // İşaret: scooter-02'ye bir konum daha. Aynı soketteki mesajlar sırayla gelir; sürücü
+    // room-a'yı alsaydı (ops onu çoktan aldı) o mesaj işaretten önce ulaşmış olurdu.
+    await send('scooter-02', 1);
     await vi.waitFor(() =>
-      expect(driverSaw.filter((u) => u === 'room-b')).toHaveLength(2),
+      expect(driverSaw.filter((u) => u === 'scooter-02')).toHaveLength(2),
     );
-    // Sürücü ikinci aboneliğinde ilk odadan çıkarıldı: sadece room-b'yi görür.
     expect(driverSaw).not.toContain('room-a');
   });
 
+  it('kiralama ve bırakma bağlı istemcilere duyurulur (sürücünün seçim ekranı yenilenir)', async () => {
+    const token = await registerRider(app, 'ws-surucu-3');
+    const watcher = connectRider(token);
+    await connected(watcher);
+    const changed = new Promise<{ change: string; scooterId: string }>(
+      (resolve) => watcher.on('scooters-changed', resolve),
+    );
+    await rentScooter(app, token, 'scooter-03').expect(201);
+    expect(await changed).toEqual({
+      change: 'rentals',
+      scooterId: 'scooter-03',
+    });
+  });
+
   it('olay odası (events) tüm filonun alan olaylarını alır, konum yayınını almaz; tam yetki ister', async () => {
-    const connected = (socket: Socket) =>
-      new Promise<void>((resolve) => socket.on('connect', () => resolve()));
-    const driver = connect(DRIVER_KEY);
+    const token = await registerRider(app, 'ws-surucu-4');
+    const driver = connectRider(token);
     const logs = connect(KEY);
     const monitor = connect(KEY);
     await Promise.all([connected(driver), connected(logs), connected(monitor)]);
     expect(await driver.emitWithAck('subscribe', { events: true })).toEqual({
       ok: false,
-      error: expect.stringMatching(/tam yetkili/),
+      error: expect.stringMatching(/API anahtarı ister/),
     });
     expect(await logs.emitWithAck('subscribe', { events: true })).toEqual({
       ok: true,

@@ -4,8 +4,8 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, test } from 'node:test';
 import { chromium } from 'playwright-core';
+import { newRider, registerScooter, signInAndRent, startRide } from './driverSession.mjs';
 
-const DRIVER_URL = process.env.DRIVER_URL ?? 'http://localhost:8081';
 const CENTER = { lat: 40.984, lng: 29.035 };
 const ZOOM = 15;
 
@@ -52,10 +52,9 @@ before(async () => {
   browser = await chromium.launch({ channel: process.env.PW_CHANNEL ?? 'chrome', headless: true });
   // Denizdeki test noktası haritanın sol kenarında; görünür kalması için geniş pencere.
   page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
-  await page.goto(DRIVER_URL);
-  await page.waitForSelector('.leaflet-marker-icon.rider');
-  // Yol ağı yüklendi mi?
-  await page.waitForFunction(() => document.querySelector('.panel')?.textContent.includes('yol üzerinde kalır'));
+  // Harita girişten ve scooter seçiminden sonra açılır; sürükleme ve rota sürüşle.
+  await signInAndRent(page, await newRider('roads'), await registerScooter('roads'));
+  await startRide(page);
   const box = await page.locator('.map').boundingBox();
   toScreen = (point) => {
     const c = project(CENTER);

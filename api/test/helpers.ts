@@ -8,6 +8,8 @@ import {
   type AppConfig,
   loadConfig,
 } from '../src/config/configuration.js';
+import { ScooterRegistry } from '../src/fleet/scooter-registry.js';
+import { DEFAULT_SCOOTERS } from '../src/database/migrations/1727400000000-FleetAndRiders.js';
 import { LocationLanes } from '../src/queue/location-lanes.js';
 import { setupApp } from '../src/setup-app.js';
 import { WorkerModule } from '../src/worker.module.js';
@@ -17,20 +19,40 @@ interface TestAppOptions {
   config?: (base: AppConfig) => AppConfig;
   /** false: sadece API; kuyruk işlenmez (backpressure testi için). */
   withWorker?: boolean;
+  /**
+   * Konum senaryoları (giriş/çıkış, sıra, şeritler) scooter kaydından bağımsızdır ve her testte
+   * yeni kimlik kullanır: varsayılan olarak her kimlik kayıtlı sayılır. Kayıt kuralını test
+   * edenler 'registered' ile gerçek listeyi kullanır (fleet.e2e-spec.ts).
+   */
+  scooters?: 'any' | 'registered';
 }
+
+/** Her kimliği kayıtlı sayan liste (bkz. TestAppOptions.scooters). */
+const ANY_SCOOTER: Pick<
+  ScooterRegistry,
+  'assertRegistered' | 'added' | 'removed' | 'refresh'
+> = {
+  assertRegistered: () => undefined,
+  added: () => undefined,
+  removed: () => undefined,
+  refresh: async () => undefined,
+};
 
 /** API ve worker'ı aynı süreçte ayağa kaldırır; gerçek PostGIS + Redis kullanır. */
 export async function createTestApp(
   options: TestAppOptions = {},
 ): Promise<INestApplication> {
   const base = loadConfig();
-  const moduleRef = await Test.createTestingModule({
+  let builder = Test.createTestingModule({
     imports:
       options.withWorker === false ? [AppModule] : [AppModule, WorkerModule],
   })
     .overrideProvider(APP_CONFIG)
-    .useValue(options.config ? options.config(base) : base)
-    .compile();
+    .useValue(options.config ? options.config(base) : base);
+  if (options.scooters !== 'registered') {
+    builder = builder.overrideProvider(ScooterRegistry).useValue(ANY_SCOOTER);
+  }
+  const moduleRef = await builder.compile();
   const app = moduleRef.createNestApplication({
     logger: ['error', 'warn'],
     return503OnClosing: true,
@@ -47,12 +69,46 @@ export async function resetState(app: INestApplication): Promise<void> {
       .queues()
       .map((queue) => queue.drain(true)),
   );
-  await app
-    .get(DataSource)
-    .query(
-      'TRUNCATE area_logs, user_last_location, areas RESTART IDENTITY CASCADE',
-    );
+  const db = app.get(DataSource);
+  await db.query(
+    'TRUNCATE area_logs, user_last_location, areas, rentals, riders RESTART IDENTITY CASCADE',
+  );
+  // Filo kurulumdaki haline döner: varsayılan 5 scooter, silinmemiş.
+  await db.query('DELETE FROM scooters WHERE NOT (id = ANY($1))', [
+    DEFAULT_SCOOTERS.map((s) => s.id),
+  ]);
+  await db.query(
+    `INSERT INTO scooters (id, name) SELECT * FROM unnest($1::varchar[], $2::varchar[])
+     ON CONFLICT (id) DO UPDATE SET deleted_at = NULL, name = EXCLUDED.name`,
+    [DEFAULT_SCOOTERS.map((s) => s.id), DEFAULT_SCOOTERS.map((s) => s.name)],
+  );
+  // Filo SQL ile değişti (duyurusuz): bellekteki kayıt listesi de yenilensin.
+  await app.get(ScooterRegistry).refresh();
 }
+
+/** Yeni sürücü hesabı açar; oturum token'ını döner. */
+export async function registerRider(
+  app: INestApplication,
+  username: string,
+  password = 'sifre-12345',
+): Promise<string> {
+  const res = await request(app.getHttpServer())
+    .post('/auth/register')
+    .send({ username, password })
+    .expect(201);
+  return (res.body as { token: string }).token;
+}
+
+/** Sürücü oturumuyla scooter kiralar. */
+export const rentScooter = (
+  app: INestApplication,
+  token: string,
+  scooterId: string,
+) =>
+  request(app.getHttpServer())
+    .post('/rentals')
+    .set('authorization', `Bearer ${token}`)
+    .send({ scooterId });
 
 /** Kuyrukta bekleyen/işlenen iş kalmayana kadar bekler. */
 export async function waitForQueueDrain(
@@ -114,13 +170,19 @@ export interface LogRow {
   areaId: string;
   entryTime: string;
   exitTime: string | null;
+  exitReason: string | null;
 }
 
-/** Kullanıcının giriş kayıtları (en yeni başta). */
-export const logsFor = async (app: INestApplication, userId: string) =>
+/** Kullanıcının giriş kayıtları (en yeni başta). API anahtarı gerekiyorsa `apiKey`. */
+export const logsFor = async (
+  app: INestApplication,
+  userId: string,
+  apiKey?: string,
+) =>
   (
     await request(app.getHttpServer())
       .get('/logs')
+      .set(apiKey ? { 'x-api-key': apiKey } : {})
       .query({ userId })
       .expect(200)
   ).body.data as LogRow[];

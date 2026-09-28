@@ -1,4 +1,5 @@
 import { lazy, Suspense, useEffect, useState } from 'react';
+import { FleetView } from './fleet/FleetView';
 import { LiveMap } from './live/LiveMap';
 import { LogsView } from './logs/LogsView';
 import { SystemStatus } from './SystemStatus';
@@ -10,6 +11,7 @@ const ROUTES = [
   { hash: '#/live', label: 'Canlı izleme' },
   { hash: '#/logs', label: 'Giriş kayıtları' },
   { hash: '#/areas', label: 'Alanlar' },
+  { hash: '#/scooters', label: 'Scooterlar' },
 ] as const;
 
 type Route = (typeof ROUTES)[number]['hash'];
@@ -44,6 +46,7 @@ export function App() {
       <main>
         {route === '#/live' ? <LiveMap /> : null}
         {route === '#/logs' ? <LogsView /> : null}
+        {route === '#/scooters' ? <FleetView /> : null}
         {route === '#/areas' ? (
           <Suspense fallback={<div className="loading">Harita araçları yükleniyor</div>}>
             <AreasEditor />

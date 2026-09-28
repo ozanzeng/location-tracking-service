@@ -5,6 +5,7 @@ import type { AreaType } from '../areas/area-type.enum.js';
 import { decodeCursor, encodeCursor } from './cursor.js';
 import type { ListLogsQueryDto } from './dto/list-logs-query.dto.js';
 import type { LogPageDto } from './dto/log-response.dto.js';
+import type { ExitReason } from '../geofence/exit-reason.enum.js';
 
 interface LogRow {
   id: string;
@@ -14,6 +15,7 @@ interface LogRow {
   area_type: AreaType;
   entry_time: Date;
   exit_time: Date | null;
+  exit_reason: ExitReason | null;
 }
 
 @Injectable()
@@ -52,7 +54,7 @@ export class LogsService {
     const limit = query.limit;
     const rows: LogRow[] = await this.dataSource.query(
       `SELECT l.id, l.user_id, l.area_id, a.name AS area_name, a.type AS area_type,
-              l.entry_time, l.exit_time
+              l.entry_time, l.exit_time, l.exit_reason
          FROM area_logs l
          JOIN areas a ON a.id = l.area_id
         ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
@@ -74,6 +76,7 @@ export class LogsService {
         areaType: r.area_type,
         entryTime: r.entry_time.toISOString(),
         exitTime: r.exit_time?.toISOString() ?? null,
+        exitReason: r.exit_reason,
       })),
       nextCursor:
         hasMore && last

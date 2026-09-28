@@ -10,12 +10,19 @@ export const updatesChannel = (prefix: string) => `${prefix}:updates`;
 /** Alan listesi değişince (yeni alan) tüm istemcilere duyuru. */
 export const areasChannel = (prefix: string) => `${prefix}:areas`;
 
+/** Alan listesi değişti; istemciler listeyi yeniden çeker. */
 export interface AreasChangedMessage {
-  created: AreaRef;
+  created?: AreaRef;
+  updated?: AreaRef;
+  deleted?: { id: string };
 }
 
+/**
+ * İşlenmiş konum ve giriş/çıkış olayları (worker). Alan düzenlenince ya da silinince kapanan
+ * girişler konumsuz yayınlanır (API).
+ */
 export interface GeofenceUpdateMessage {
-  position: PositionUpdate;
+  position?: PositionUpdate;
   events: AreaEvent[];
 }
 

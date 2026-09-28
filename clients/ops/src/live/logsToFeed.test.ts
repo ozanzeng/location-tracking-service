@@ -10,6 +10,7 @@ const log = (id: string, entryTime: string, exitTime: string | null): LogEntry =
   areaType: 'NO_RIDE',
   entryTime,
   exitTime,
+  exitReason: null,
 });
 
 describe('logsToFeed', () => {

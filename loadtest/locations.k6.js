@@ -61,6 +61,8 @@ const MEASURED = PROFILE === 'load' ? 'peak' : 'soak';
 
 export const options = {
   scenarios: SCENARIOS[PROFILE],
+  // Kurulumda SCOOTERS kadar scooter kaydedilir (bkz. setup).
+  setupTimeout: '120s',
   thresholds: {
     http_req_failed: ['rate<0.01'],
     checks: ['rate>0.99'],
@@ -120,8 +122,30 @@ function post(location) {
   });
 }
 
-/** Yük başlamadan tek istek: adres ya da anahtar yanlışsa binlerce hata yerine hemen dur. */
+/**
+ * Sadece kayıtlı scooter'lar konum gönderebilir: yük başlamadan test filosu (load-0 …
+ * load-N, load-setup) POST /scooters ile kaydedilir; zaten kayıtlıysa 409 da kabul. Sonra
+ * tek bir konum: adres ya da anahtar yanlışsa binlerce hata yerine hemen durulur. Test verisi
+ * run.sh'ta kuyruk boşalınca silinir.
+ */
 export function setup() {
+  const ids = ['load-setup', ...Array.from({ length: SCOOTERS }, (_, i) => `load-${i}`)];
+  const headers = { 'content-type': 'application/json', 'x-api-key': API_KEY };
+  for (let from = 0; from < ids.length; from += 200) {
+    const responses = http.batch(
+      ids.slice(from, from + 200).map((id) => ({
+        method: 'POST',
+        url: `${BASE_URL}/scooters`,
+        body: JSON.stringify({ id, name: `Yük testi ${id}` }),
+        // 409 (önceki koşudan kayıtlı) hata sayılmasın: http_req_failed eşiğini bozardı.
+        params: { headers, tags: { name: 'setup: POST /scooters' }, responseCallback: http.expectedStatuses(201, 409) },
+      })),
+    );
+    const failed = responses.find((r) => r.status !== 201 && r.status !== 409);
+    if (failed) {
+      exec.test.abort(`Test filosu kaydedilemedi (${failed.status || failed.error}): BASE_URL ve API_KEY'i kontrol edin`);
+    }
+  }
   const res = post({ userId: 'load-setup', ...routePoint(0, Date.now() / 1000), timestamp: new Date().toISOString() });
   if (res.status !== 202) {
     exec.test.abort(`Servis konum kabul etmiyor (${res.status || res.error}): BASE_URL ve API_KEY'i kontrol edin`);

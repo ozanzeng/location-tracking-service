@@ -3,17 +3,33 @@ import type { AppConfig } from '../config/configuration.js';
 import { Area } from '../areas/area.entity.js';
 import { AreaLog } from '../logs/area-log.entity.js';
 import { UserLastLocation } from '../geofence/user-last-location.entity.js';
+import { Rental } from '../fleet/rental.entity.js';
+import { Scooter } from '../fleet/scooter.entity.js';
+import { Rider } from '../riders/rider.entity.js';
 import { Init1727000000000 } from './migrations/1727000000000-Init.js';
 import { OpenVisitIndexAndHotUpdates1727100000000 } from './migrations/1727100000000-OpenVisitIndexAndHotUpdates.js';
 import { AreaLogsAutovacuum1727200000000 } from './migrations/1727200000000-AreaLogsAutovacuum.js';
 import { QueryStats1727300000000 } from './migrations/1727300000000-QueryStats.js';
+import { FleetAndRiders1727400000000 } from './migrations/1727400000000-FleetAndRiders.js';
+import { AreaEdits1727500000000 } from './migrations/1727500000000-AreaEdits.js';
+import { RentalHistoryIndex1727600000000 } from './migrations/1727600000000-RentalHistoryIndex.js';
 
-export const ENTITIES = [Area, AreaLog, UserLastLocation];
+export const ENTITIES = [
+  Area,
+  AreaLog,
+  UserLastLocation,
+  Scooter,
+  Rider,
+  Rental,
+];
 export const MIGRATIONS = [
   Init1727000000000,
   OpenVisitIndexAndHotUpdates1727100000000,
   AreaLogsAutovacuum1727200000000,
   QueryStats1727300000000,
+  FleetAndRiders1727400000000,
+  AreaEdits1727500000000,
+  RentalHistoryIndex1727600000000,
 ];
 
 /**

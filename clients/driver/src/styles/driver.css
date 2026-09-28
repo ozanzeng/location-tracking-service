@@ -288,3 +288,144 @@
     animation: none;
   }
 }
+
+/* Giriş ve scooter seçimi: haritasız, ortalanmış kart */
+
+.gate {
+  display: grid;
+  place-items: start center;
+  height: 100%;
+  padding: 2.5rem 1rem;
+  overflow-y: auto;
+}
+
+.gate__card {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  width: min(100%, 24rem);
+  padding: 1.75rem 1.5rem;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--paper);
+}
+
+.gate__card--wide {
+  width: min(100%, 36rem);
+}
+
+.gate__notice {
+  max-width: 36rem;
+  margin: 1.5rem auto 0;
+}
+
+.account {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.account__logout {
+  padding: 0.25rem 0.6rem;
+  border: 1px solid #6b717b;
+  border-radius: 4px;
+  background: none;
+  color: #fff;
+  font-size: var(--step--1);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+/* Filo: her scooter bir park cebi; plaka gibi kimlik, durum şeridi */
+
+.fleet {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr));
+  gap: 0.75rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.bay {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.35rem;
+  width: 100%;
+  min-height: 7rem;
+  padding: 0.85rem 0.85rem 0.75rem;
+  border: 2px dashed #c3c8c5;
+  border-radius: 10px;
+  background: #fff;
+  text-align: left;
+  cursor: pointer;
+}
+
+.bay[data-status='AVAILABLE'] {
+  border: 2px solid var(--sign-blue);
+}
+
+.bay[data-status='AVAILABLE']:hover:not(:disabled) {
+  background: #eaf1fa;
+}
+
+.bay:disabled {
+  cursor: not-allowed;
+}
+
+.bay[data-status='IN_USE'] {
+  background: var(--road);
+  color: var(--asphalt-soft);
+}
+
+.bay__plate {
+  display: inline-block;
+  padding: 0.1rem 0.45rem;
+  border: 1.5px solid currentColor;
+  border-radius: 4px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
+
+.bay__name {
+  font-weight: 700;
+}
+
+.bay__status {
+  margin-top: auto;
+  font-size: var(--step--1);
+  font-weight: 700;
+}
+
+.bay[data-status='AVAILABLE'] .bay__status {
+  color: #2f7a4c;
+}
+
+.empty-fleet {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.85rem 1rem;
+  border-left: 4px solid var(--caution);
+  background: #fdf6e3;
+}
+
+.empty-fleet strong {
+  font-size: var(--step-1);
+}
+
+.ride__scooter {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin: 0;
+  color: var(--asphalt-soft);
+  font-size: var(--step--1);
+}
+
+.ride__scooter .bay__plate {
+  color: var(--asphalt);
+  font-size: var(--step-0);
+}

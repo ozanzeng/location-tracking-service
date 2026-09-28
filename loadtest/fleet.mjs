@@ -1,6 +1,7 @@
 // Demo filosu: Kadıköy'de rastgele dolaşan N scooter, her biri gerçek cihaz gibi
 // 5 saniyede bir kendi konumunu gönderir. Operasyon ekranını doldurmak içindir;
-// yük testi için loadtest/run.sh (k6) kullanılır.
+// yük testi için loadtest/run.sh (k6) kullanılır. Sadece kayıtlı scooterlar konum
+// gönderebildiği için filo başta kaydedilir (fleet-001 …), Ctrl+C ile çıkarılır.
 //
 // Kullanım: node loadtest/fleet.mjs [adet]   (varsayılan 50, Ctrl+C ile durur)
 // Ortam: API_URL (varsayılan http://localhost:3000), API_KEY (varsayılan dev-api-key)
@@ -65,6 +66,20 @@ async function send(s) {
   }
 }
 
+const headers = { 'content-type': 'application/json', 'x-api-key': API_KEY };
+for (const s of fleet) {
+  const res = await fetch(`${API_URL}/scooters`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ id: s.id, name: `Demo ${s.id}` }),
+  });
+  // 409: önceki çalıştırmadan hâlâ kayıtlı.
+  if (res.status !== 201 && res.status !== 409) {
+    console.error(`Scooter kaydedilemedi (${s.id}): ${res.status} ${await res.text()}`);
+    process.exit(1);
+  }
+}
+
 const timers = fleet.map((s) =>
   setTimeout(() => {
     void send(s);
@@ -81,11 +96,17 @@ const report = setInterval(() => {
   );
 }, 1000);
 
-process.on('SIGINT', () => {
+process.on('SIGINT', async () => {
   timers.forEach(clearTimeout);
   fleet.forEach((s) => clearInterval(s.timer));
   clearInterval(report);
-  console.log('\nFilo durduruldu.');
+  // Filodan çıkarılır: sürücülerin seçim listesinde ve operasyonun filo ekranında kalmasın.
+  await Promise.all(
+    fleet.map((s) =>
+      fetch(`${API_URL}/scooters/${s.id}`, { method: 'DELETE', headers }).catch(() => undefined),
+    ),
+  );
+  console.log('\nFilo durduruldu ve filodan çıkarıldı.');
   process.exit(0);
 });
 

@@ -11,9 +11,8 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, test } from 'node:test';
 import { chromium } from 'playwright-core';
+import { newRider, OPS_URL, registerScooter, signInAndRent, startRide } from './driverSession.mjs';
 
-const DRIVER_URL = process.env.DRIVER_URL ?? 'http://localhost:8081';
-const OPS_URL = process.env.OPS_URL ?? 'http://localhost:8080';
 const GPS_WAIT = 12_000; // 5 sn örnekleme + kuyruk + canlı yayın payı
 
 // Harita merkezi ve zoom'u BaseMap ile aynı; coğrafi noktayı ekran pikseline çevirmek için.
@@ -41,7 +40,7 @@ let browser;
 let driver;
 let ops;
 const errors = [];
-const scooterId = `ui-${Date.now().toString(36)}`;
+let scooterId;
 
 before(async () => {
   browser = await chromium.launch({ channel: process.env.PW_CHANNEL ?? 'chrome', headless: true });
@@ -53,10 +52,10 @@ before(async () => {
     if (name === 'driver') driver = page;
     else ops = page;
   }
+  scooterId = await registerScooter('exchange');
   await ops.goto(`${OPS_URL}/#/live`);
   await ops.waitForSelector('.live:not(.live--off)');
-  await driver.goto(DRIVER_URL);
-  await driver.waitForSelector('.leaflet-marker-icon.rider');
+  await signInAndRent(driver, await newRider('exchange'), scooterId);
 });
 
 after(async () => {
@@ -65,8 +64,7 @@ after(async () => {
 
 describe('sürücü ↔ servis ↔ operasyon', () => {
   test('sürüş başlayınca konum gönderilir', { timeout: 20_000 }, async () => {
-    await driver.locator('#scooter-id').fill(scooterId);
-    await driver.getByRole('button', { name: 'Sürüşü başlat' }).click();
+    await startRide(driver);
     await driver
       .locator('.device-log__item--sent', { hasText: 'Konum gönderildi' })
       .first()
@@ -89,7 +87,8 @@ describe('sürücü ↔ servis ↔ operasyon', () => {
 
     // Operasyon: giriş kayıtları tablosunda, hâlâ içeride
     await ops.goto(`${OPS_URL}/#/logs`);
-    await ops.locator('.filters input').first().fill(scooterId);
+    // Üstteki filtre kayıtlı scooterları listeler.
+    await ops.getByLabel('Scooter').selectOption(scooterId);
     await ops.getByRole('button', { name: 'Filtrele' }).click();
     const row = ops.locator('.logs tbody tr', { hasText: scooterId }).filter({ hasText: 'Altıyol Kavşağı' });
     await row.waitFor();
@@ -99,6 +98,14 @@ describe('sürücü ↔ servis ↔ operasyon', () => {
       (id) => [...document.querySelectorAll('.logs tbody tr')].every((tr) => tr.textContent.includes(id)),
       scooterId,
     );
+
+    // Scooter'a tıklayınca sağda detay paneli: kimde, içinde bulunduğu alan ve cihaz günlüğü.
+    await row.getByRole('button', { name: scooterId }).click();
+    const drawer = ops.getByRole('complementary', { name: new RegExp(scooterId) });
+    await drawer.getByText(/Kullanımda: ui-exchange-/).waitFor();
+    await drawer.locator('.device-feed', { hasText: 'Girdi: Altıyol Kavşağı' }).waitFor();
+    await ops.keyboard.press('Escape');
+    await drawer.waitFor({ state: 'detached' });
   });
 
   test('park yasak bölgede sürüş bitirilemez', async () => {
@@ -138,6 +145,41 @@ describe('sürücü ↔ servis ↔ operasyon', () => {
     await ops.getByRole('button', { name: 'Alanı kaydet' }).click();
     await ops.locator('.panel .hint', { hasText: 'kaydedildi' }).waitFor();
     await refetch;
+  });
+
+  test('operasyon alanı düzenleyip silince sürücü sayfa yenilenmeden güncellenir', { timeout: 30_000 }, async () => {
+    const name = `UI testi ${scooterId}`;
+    const renamed = `${name} (düzenlendi)`;
+    const refetch = () =>
+      driver.waitForRequest((r) => r.url().endsWith('/api/areas') && r.method() === 'GET', { timeout: 10_000 });
+
+    // Düzenle: ad değişir, kaydedilir; liste ve sürücü güncellenir.
+    await ops.locator('.area-list li', { hasText: name }).getByRole('button', { name: 'Düzenle' }).click();
+    await ops.getByRole('heading', { name: 'Alanı düzenle' }).waitFor();
+    await ops.locator('#area-name').fill(renamed);
+    let driverRefetched = refetch();
+    await ops.getByRole('button', { name: 'Değişiklikleri kaydet' }).click();
+    await ops.locator('.panel .hint', { hasText: 'güncellendi' }).waitFor();
+    await ops.locator('.area-list li', { hasText: renamed }).waitFor();
+    await driverRefetched;
+
+    // Sil: sayfa içi onay, liste ve sürücü güncellenir.
+    const row = ops.locator('.area-list li', { hasText: renamed });
+    await row.getByRole('button', { name: 'Sil' }).click();
+    driverRefetched = refetch();
+    await row.getByRole('button', { name: 'Evet, sil' }).click();
+    await ops.locator('.panel .hint', { hasText: 'silindi' }).waitFor();
+    await ops.locator('.area-list li', { hasText: renamed }).waitFor({ state: 'detached' });
+    await driverRefetched;
+  });
+
+  test('operasyonun filo ekranında scooter bu sürücüde görünür', async () => {
+    await ops.goto(`${OPS_URL}/#/scooters`);
+    const row = ops.locator('.logs tbody tr', { hasText: scooterId });
+    await row.waitFor();
+    assert.match(await row.textContent(), /Kullanımda: ui-exchange-/);
+    // Kullanımdaki scooter silinemez.
+    assert.equal(await row.getByRole('button', { name: 'Sil' }).isDisabled(), true);
   });
 
   test('iki uygulamada da konsol hatası yok', () => {

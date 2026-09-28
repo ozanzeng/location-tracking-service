@@ -59,6 +59,7 @@ export class GeofenceRepository {
              SELECT json_agg(json_build_object('id', a.id, 'name', a.name, 'type', a.type))
                FROM areas a
               WHERE ST_Contains(a.geom, ST_SetSRID(ST_MakePoint($2, $3), 4326))
+                AND a.deleted_at IS NULL
            ), '[]'::json) AS inside,
            COALESCE((
              SELECT json_agg(json_build_object('id', a.id, 'name', a.name, 'type', a.type))

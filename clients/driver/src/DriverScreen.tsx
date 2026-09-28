@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { api, ApiError } from '@shared/api/client';
 import { useAreas } from '@shared/hooks/useAreas';
 import { AreasLayer } from '@shared/map/AreasLayer';
 import { BaseMap } from '@shared/map/BaseMap';
@@ -11,14 +12,13 @@ import { useGpsSampler } from './device/useGpsSampler';
 import { useOutbox } from './device/useOutbox';
 import { endRideBlocker } from './ride/endRideRules';
 import { RidePanel } from './ride/RidePanel';
+import { useRentalWatch } from './ride/useRentalWatch';
 import { CurrentZones } from './rider/CurrentZones';
 import { PlateStack } from './rider/PlateStack';
 import { RiderMarker } from './rider/RiderMarker';
 import { riderZone } from './rider/riderZone';
-import { ScooterIdField } from './rider/ScooterIdField';
 import { useRiderEvents } from './rider/useRiderEvents';
 import { useRiderPosition } from './rider/useRiderPosition';
-import { useScooterId } from './rider/useScooterId';
 import { MovementPanel, MoveMode } from './route/MovementPanel';
 import { RouteDrawing } from './route/RouteDrawing';
 import { RouteLayer } from './route/RouteLayer';
@@ -26,11 +26,24 @@ import { useRoadNetwork } from './route/useRoadNetwork';
 import { useRoutePlanner } from './route/useRoutePlanner';
 import { useRoutePlayback } from './route/useRoutePlayback';
 
+/** Sürüşün nasıl bittiği: sürücü bıraktı ya da sunucu sinyal kaybıyla bitirdi. */
+export const RideEnd = { RETURNED: 'returned', LOST: 'lost' } as const;
+export type RideEnd = (typeof RideEnd)[keyof typeof RideEnd];
+
+interface Props {
+  /** Kiralanan scooter; konumlar onun adına gider. */
+  scooterId: string;
+  onRideEnded: (end: RideEnd, scooterId: string) => void;
+  onSessionExpired: () => void;
+}
+
 /** Sürücü ekranı: harita + panel. Her parça kendi klasöründe; burası sadece birbirine bağlar. */
-export function DriverScreen() {
+export function DriverScreen({ scooterId, onRideEnded, onSessionExpired }: Props) {
   const { areas } = useAreas();
-  const [scooterId, setScooterId] = useScooterId();
   const [riding, setRiding] = useState(false);
+  /** Scooter bırakılıyor: bekleyen konumlar gönderiliyor, ardından kiralama bitiyor. */
+  const [ending, setEnding] = useState(false);
+  const [endError, setEndError] = useState<string | null>(null);
   const [online, setOnline] = useState(true);
   // Uyarı verildiği konuma bağlı: scooter hareket edince (yeni konum) geçerliliğini yitirir.
   // Efektle temizlemek oynatmada her adımda fazladan bir çizim demekti.
@@ -42,7 +55,16 @@ export function DriverScreen() {
   const { roads, restrictions, error: roadsError } = useRoadNetwork(areas);
   const planner = useRoutePlanner(roads, restrictions, live);
   const playback = useRoutePlayback(planner.path, speedKmh, moveTo, planner.clear);
-  const outbox = useOutbox(online);
+  /**
+   * Sürücü scooter'ı bırakırken sunucu kiralamanın bittiğini duyurur; bu, sinyal kaybı sanılıp
+   * "kiralama sona erdi" denmesin.
+   */
+  const releasing = useRef(false);
+  const lost = useCallback(() => {
+    if (!releasing.current) onRideEnded(RideEnd.LOST, scooterId);
+  }, [onRideEnded, scooterId]);
+  const checkRental = useRentalWatch(scooterId, lost, onSessionExpired);
+  const outbox = useOutbox(online, { onUnauthorized: onSessionExpired, onRentalRejected: checkRental });
   const { plates, dismiss, currentAreas } = useRiderEvents(scooterId);
   const gps = useGpsSampler(riding, scooterId, live, position, areas, outbox.record);
 
@@ -51,6 +73,29 @@ export function DriverScreen() {
     const snap = roads?.snap(live.current, START_SNAP_METERS);
     if (snap) moveTo(snap.point);
   }, [roads, live, moveTo]);
+
+  /**
+   * Scooter'ı bırakır: önce bekleyen konumlar gönderilir (bağlantı kesikse açılır), sonra
+   * kiralama sunucuda biter ve scooter başka sürücülere açılır.
+   */
+  const release = async () => {
+    setEnding(true);
+    setEndError(null);
+    setOnline(true);
+    await outbox.drain();
+    releasing.current = true;
+    try {
+      await api.endRental();
+      onRideEnded(RideEnd.RETURNED, scooterId);
+    } catch (err) {
+      releasing.current = false;
+      if (err instanceof ApiError && err.status === 401) return onSessionExpired();
+      // 404: kiralama zaten bitmiş (ör. sinyal kaybı).
+      if (err instanceof ApiError && err.status === 404) return lost();
+      setEndError(`Scooter bırakılamadı: ${(err as Error).message}`);
+      setEnding(false);
+    }
+  };
 
   const toggleRide = () => {
     if (!riding) {
@@ -62,7 +107,10 @@ export function DriverScreen() {
     }
     const blocker = endRideBlocker(live.current, areas);
     setRideNotice(blocker ? { text: blocker, at: position } : null);
-    if (!blocker) setRiding(false);
+    if (!blocker) {
+      setRiding(false);
+      void release();
+    }
   };
 
   const { clear: clearRoute } = planner;
@@ -71,7 +119,8 @@ export function DriverScreen() {
     clearRoute();
   }, [live, moveTo, clearRoute]);
 
-  const drawing = mode === MoveMode.ROUTE && !playback.playing && roads !== null;
+  // Sürüş başlamadan scooter hareket etmez: sürükleme, rota çizme ve oynatma sürüşle açılır.
+  const drawing = riding && mode === MoveMode.ROUTE && !playback.playing && roads !== null;
   const notice = rideNotice?.at === position ? rideNotice.text : null;
 
   return (
@@ -89,11 +138,13 @@ export function DriverScreen() {
               onHoverStop={planner.setHoveredStop}
             />
           ) : null}
-          <RouteLayer path={planner.path} stops={planner.stops} hoveredStop={drawing ? planner.hoveredStop : null} />
+          {riding ? (
+            <RouteLayer path={planner.path} stops={planner.stops} hoveredStop={drawing ? planner.hoveredStop : null} />
+          ) : null}
           <RiderMarker
             position={position}
             zone={riderZone(riding, currentAreas)}
-            draggable={mode === MoveMode.DRAG && !playback.playing}
+            draggable={riding && mode === MoveMode.DRAG && !playback.playing}
             roads={roads}
             restrictions={restrictions}
             live={live}
@@ -105,30 +156,37 @@ export function DriverScreen() {
       </div>
 
       <aside className="panel">
-        <RidePanel riding={riding} notice={notice} onToggle={toggleRide} />
-        <MovementPanel
-          mode={mode}
-          onModeChange={setMode}
-          playing={playback.playing}
-          onTogglePlay={playback.toggle}
-          speedKmh={speedKmh}
-          onSpeedChange={setSpeedKmh}
-          stopCount={planner.stops.length}
-          lengthMeters={planner.length}
-          roadsReady={roads !== null}
-          roadsError={roadsError}
-          notice={planner.notice}
-          onClear={planner.clear}
-        />
-        <CurrentZones areas={currentAreas} riding={riding} />
-        <ConnectionPanel
+        <RidePanel
+          scooterId={scooterId}
           riding={riding}
-          online={online}
-          pending={outbox.pending}
-          onToggle={() => setOnline((o) => !o)}
+          ending={ending}
+          notice={endError ?? notice}
+          onToggle={toggleRide}
+          onRelease={() => void release()}
         />
+        {riding ? (
+          <>
+            <MovementPanel
+              mode={mode}
+              onModeChange={setMode}
+              playing={playback.playing}
+              onTogglePlay={playback.toggle}
+              speedKmh={speedKmh}
+              onSpeedChange={setSpeedKmh}
+              stopCount={planner.stops.length}
+              lengthMeters={planner.length}
+              roadsReady={roads !== null}
+              roadsError={roadsError}
+              notice={planner.notice}
+              onClear={planner.clear}
+            />
+            <CurrentZones areas={currentAreas} riding={riding} />
+            <ConnectionPanel online={online} pending={outbox.pending} onToggle={() => setOnline((o) => !o)} />
+          </>
+        ) : (
+          <p className="hint">Sürüşü başlatınca scooter'ı haritada sürükleyebilir ya da rota çizip oynatabilirsiniz.</p>
+        )}
         <DeviceLog entries={outbox.log} />
-        <ScooterIdField value={scooterId} onChange={setScooterId} disabled={riding} />
         <Legend />
       </aside>
     </div>

@@ -50,7 +50,8 @@ await step('bekleyen migration yok', async () => {
 
 await step('tablolar ve index’ler', async () => {
   const rows = await ds.query(
-    `SELECT indexname FROM pg_indexes WHERE schemaname = 'public' AND tablename IN ('areas', 'area_logs', 'user_last_location')`,
+    `SELECT indexname FROM pg_indexes WHERE schemaname = 'public'
+       AND tablename IN ('areas', 'area_logs', 'user_last_location', 'scooters', 'riders', 'rentals')`,
   );
   const names = new Set(rows.map((r) => r.indexname));
   const required = [
@@ -61,6 +62,13 @@ await step('tablolar ve index’ler', async () => {
     'area_logs_user_idx',
     'area_logs_area_idx',
     'user_last_location_pkey',
+    // Filo ve kiralama: bir scooter ve bir sürücü için tek açık kiralama, benzersiz kullanıcı
+    // adı. Bunlar olmadan iki sürücü aynı scooter'ı alabilirdi.
+    'scooters_pkey',
+    'riders_username_uq',
+    'rentals_active_scooter_uq',
+    'rentals_active_rider_uq',
+    'rentals_scooter_history_idx',
   ];
   const missing = required.filter((n) => !names.has(n));
   expect(missing.length === 0, `eksik index: ${missing.join(', ')}`);
@@ -95,7 +103,7 @@ await step('coğrafi sorgu çalışıyor', async () => {
     `SELECT ST_Contains(ST_GeomFromText('POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))', 4326), ST_SetSRID(ST_MakePoint(0.5, 0.5), 4326)) AS inside`,
   );
   expect(inside === true, 'ST_Contains beklenen sonucu vermedi');
-  const { n } = await one(`SELECT count(*)::int AS n FROM areas`);
+  const { n } = await one(`SELECT count(*)::int AS n FROM areas WHERE deleted_at IS NULL`);
   return `${n} alan tanımlı`;
 });
 

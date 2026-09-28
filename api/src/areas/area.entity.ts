@@ -1,6 +1,7 @@
 import {
   Column,
   CreateDateColumn,
+  DeleteDateColumn,
   Entity,
   Index,
   PrimaryGeneratedColumn,
@@ -27,4 +28,11 @@ export class Area {
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt: Date;
+
+  /**
+   * Yumuşak silme: silinen alan listede ve konum işlemede yok sayılır, giriş kayıtları kalır.
+   * TypeORM find() silinmişleri kendiliğinden eler.
+   */
+  @DeleteDateColumn({ name: 'deleted_at', type: 'timestamptz' })
+  deletedAt: Date | null;
 }

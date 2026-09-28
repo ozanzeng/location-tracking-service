@@ -19,3 +19,6 @@ export const LOGS_PAGE_SIZE = 50;
 
 /** Üst çubuktaki servis durumunun (GET /health) yenilenme aralığı. */
 export const HEALTH_POLL_MS = 5000;
+
+/** Scooter detay paneli açıkken yenilenme aralığı (cihaz 5 sn'de bir gönderir). */
+export const SCOOTER_DETAIL_REFRESH_MS = 5000;

@@ -1,6 +1,9 @@
 import { Body, Controller, Get, HttpCode, Post, Query } from '@nestjs/common';
 import {
   ApiAcceptedResponse,
+  ApiBadRequestResponse,
+  ApiConflictResponse,
+  ApiForbiddenResponse,
   ApiOkResponse,
   ApiOperation,
   ApiServiceUnavailableResponse,
@@ -9,7 +12,9 @@ import {
 } from '@nestjs/swagger';
 import { ApiKeyAuth } from '../security/api-key-auth.decorator.js';
 import { RequestId } from '../common/http/request-id.decorator.js';
-import { IngestAllowed } from '../security/ingest-allowed.decorator.js';
+import { AllowRiders } from '../security/access.decorator.js';
+import { CurrentPrincipal } from '../security/current-rider.decorator.js';
+import type { Principal } from '../security/principal.js';
 import { CreateLocationBatchDto } from './dto/create-location-batch.dto.js';
 import { CreateLocationDto } from './dto/create-location.dto.js';
 import { LatestLocationsQueryDto } from './dto/latest-query.dto.js';
@@ -25,6 +30,15 @@ import { LocationsService } from './locations.service.js';
 @ApiServiceUnavailableResponse({
   description: 'Kuyruk dolu; Retry-After kadar bekleyip tekrar gönderin',
 })
+@ApiBadRequestResponse({
+  description: 'Doğrulama hatası ya da kayıtlı olmayan scooter',
+})
+@ApiForbiddenResponse({
+  description: 'Sürücü oturumu: scooter bu sürücüye kiralı değil',
+})
+@ApiConflictResponse({
+  description: 'Sürücü oturumu: aktif kiralama yok (önce scooter seçilmeli)',
+})
 @Controller('locations')
 export class LocationsController {
   constructor(
@@ -33,24 +47,29 @@ export class LocationsController {
   ) {}
 
   @Post()
-  @IngestAllowed()
+  @AllowRiders()
   @HttpCode(202)
   @ApiOperation({
     summary: 'Konum bildir',
     description:
-      'Konum kuyruğa alınır ve worker tarafından asenkron işlenir. Alan girişleri GET /logs üzerinden görülür.',
+      'Konum kuyruğa alınır ve worker tarafından asenkron işlenir. Alan girişleri GET /logs üzerinden görülür. ' +
+      'userId kayıtlı bir scooter olmalı. Sürücü oturumuyla sadece kiralanan scooter için gönderilir; API anahtarıyla kayıtlı her scooter için (park halindeyken de).',
   })
   @ApiAcceptedResponse({
     schema: {
       example: { jobId: '17:123', recordedAt: '2026-09-25T10:00:00.000Z' },
     },
   })
-  create(@Body() dto: CreateLocationDto, @RequestId() requestId?: string) {
-    return this.locationsService.enqueue(dto, requestId);
+  create(
+    @Body() dto: CreateLocationDto,
+    @CurrentPrincipal() sender?: Principal,
+    @RequestId() requestId?: string,
+  ) {
+    return this.locationsService.enqueue(dto, sender, requestId);
   }
 
   @Post('batch')
-  @IngestAllowed()
+  @AllowRiders()
   @HttpCode(202)
   @ApiOperation({
     summary: 'Toplu konum bildir',
@@ -62,9 +81,10 @@ export class LocationsController {
   })
   createBatch(
     @Body() dto: CreateLocationBatchDto,
+    @CurrentPrincipal() sender?: Principal,
     @RequestId() requestId?: string,
   ) {
-    return this.locationsService.enqueueBatch(dto.locations, requestId);
+    return this.locationsService.enqueueBatch(dto.locations, sender, requestId);
   }
 
   @Get('latest')

@@ -13,7 +13,16 @@ export interface Draft {
  * Çizim aracı (leaflet-geoman) sadece bu ekranda gerekli; ana pakete girmesin diye
  * ekran açıldığında yüklenir.
  */
-export function DrawControl({ onDraw, drafting }: { onDraw: (d: Draft) => void; drafting: boolean }) {
+export function DrawControl({
+  onDraw,
+  drafting,
+  onReady,
+}: {
+  onDraw: (d: Draft) => void;
+  drafting: boolean;
+  /** Araç yüklendi: şekil düzenleme (EditShape) bundan sonra kullanılabilir. */
+  onReady?: () => void;
+}) {
   const map = useMap();
   const [ready, setReady] = useState(false);
 
@@ -55,6 +64,7 @@ export function DrawControl({ onDraw, drafting }: { onDraw: (d: Draft) => void; 
       removalMode: false,
     });
     map.pm.setGlobalOptions({ allowSelfIntersection: false, pathOptions: { color: '#1F5FAD', weight: 2 } });
+    onReady?.();
 
     const onCreate = (e: { layer: L.Layer }) => {
       const layer = e.layer as L.Polygon;
@@ -67,7 +77,7 @@ export function DrawControl({ onDraw, drafting }: { onDraw: (d: Draft) => void; 
       map.off('pm:create', onCreate);
       map.pm.removeControls();
     };
-  }, [ready, map, onDraw]);
+  }, [ready, map, onDraw, onReady]);
 
   // Taslak varken ikinci bir çizime izin verme.
   useEffect(() => {

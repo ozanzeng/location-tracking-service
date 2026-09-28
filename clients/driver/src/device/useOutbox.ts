@@ -4,6 +4,7 @@ import type { LocationPoint } from '@shared/api/types';
 import {
   DEVICE_LOG_SIZE,
   NETWORK_RETRY_MS,
+  OUTBOX_DRAIN_TIMEOUT_MS,
   OUTBOX_MAX_BATCH as MAX_BATCH,
   OUTBOX_MAX_QUEUE as MAX_QUEUE,
 } from '../config';
@@ -20,13 +21,24 @@ export interface DeviceLogEntry {
   requestId?: string | null;
 }
 
+export interface OutboxHandlers {
+  /** 401: sürücü oturumu düştü (süresi doldu ya da çıkış yapıldı). */
+  onUnauthorized?: () => void;
+  /** 403/409: konum kiralama yüzünden reddedildi; kiralama hâlâ bu sürücüde mi bakılmalı. */
+  onRentalRejected?: () => void;
+}
+
 /**
  * Cihazın gönderim kuyruğu. Konumlar önce sıraya girer, ardından gönderilir:
  * tek nokta POST /locations, birikmiş noktalar POST /locations/batch ile gider.
  * Ağ hatasında noktalar kaybolmaz; 429/503'te sunucunun Retry-After süresine uyulur.
  * 400'de sadece sunucunun tek başına reddettiği nokta atılır.
  */
-export function useOutbox(online: boolean) {
+export function useOutbox(online: boolean, handlers: OutboxHandlers = {}) {
+  const handlersRef = useRef(handlers);
+  useEffect(() => {
+    handlersRef.current = handlers;
+  });
   const queue = useRef<LocationPoint[]>([]);
   const inFlight = useRef(false);
   const retryAt = useRef(0);
@@ -120,17 +132,17 @@ export function useOutbox(online: boolean) {
         batchLimit.current = 1;
         probing.current = true;
         addLog(LogKind.ERROR, `Sunucu konumu reddetti: ${e.message} (400)`, e.requestId);
-      } else if (e.status === 401 || e.status === 403) {
-        // Anahtar sorunu: tekrar göndermek düzeltmez ama ayar düzelince gidebilsin diye noktalar tutulur.
-        // Yerel geliştirmede en sık sebep, sürücü anahtarının API'de tanımlı olmaması.
+      } else if (e.status === 401) {
+        // Oturum düştü: noktalar tutulur, uygulama giriş ekranına döner.
         retryAt.current = Date.now() + NETWORK_RETRY_MS;
-        addLog(
-          LogKind.ERROR,
-          e.status === 401
-            ? 'Sunucu sürücü anahtarını tanımadı (401). Yerel geliştirmede api/.env içinde INGEST_API_KEYS=dev-driver-key olmalı'
-            : 'Sürücü anahtarının bu işlem için yetkisi yok (403)',
-          e.requestId,
-        );
+        addLog(LogKind.ERROR, 'Oturumun süresi doldu, tekrar giriş yapılmalı (401)', e.requestId);
+        handlersRef.current.onUnauthorized?.();
+      } else if (e.status === 403 || e.status === 409) {
+        // Scooter artık bu sürücüde değil (ör. sinyal kaybıyla kiralama bitti): bu noktalar
+        // hiçbir zaman kabul edilmez, atılır.
+        remove(batch);
+        addLog(LogKind.ERROR, `Konumlar kabul edilmedi: ${e.message} (${e.status})`, e.requestId);
+        handlersRef.current.onRentalRejected?.();
       } else {
         retryAt.current = Date.now() + NETWORK_RETRY_MS;
         addLog(
@@ -159,5 +171,13 @@ export function useOutbox(online: boolean) {
     return () => clearInterval(timer);
   }, [online, flush, addLog]);
 
-  return { record, pending, log };
+  /** Bekleyen konumlar gönderilene kadar (ya da en fazla OUTBOX_DRAIN_TIMEOUT_MS) bekler. */
+  const drain = useCallback(async () => {
+    const deadline = Date.now() + OUTBOX_DRAIN_TIMEOUT_MS;
+    while ((queue.current.length > 0 || inFlight.current) && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+  }, []);
+
+  return { record, pending, log, drain };
 }

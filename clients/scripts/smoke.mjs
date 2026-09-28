@@ -52,26 +52,25 @@ await step('yol haritası sıkıştırılmış geliyor', async () => {
   return `${data.nodes.length / 2} düğüm`;
 });
 
-for (const [name, base] of [
-  ['sürücü', DRIVER_URL],
-  ['operasyon', OPS_URL],
-]) {
-  await step(`${name}: nginx API'ye anahtarı ekliyor`, async () => {
-    const health = await get(`${base}/api/health`);
-    expect(health.ok, `/api/health → ${health.status}`);
-    // /areas anahtar ister; tarayıcı anahtar göndermez, nginx eklemeli.
-    const areas = await get(`${base}/api/areas`);
-    expect(areas.ok, `/api/areas → ${areas.status} (nginx anahtarı eklemiyor olabilir)`);
-    return `${(await areas.json()).length} alan`;
-  });
-}
+await step("operasyon: nginx API'ye anahtarı ekliyor", async () => {
+  const health = await get(`${OPS_URL}/api/health`);
+  expect(health.ok, `/api/health → ${health.status}`);
+  // /areas anahtar ister; tarayıcı anahtar göndermez, nginx eklemeli.
+  const areas = await get(`${OPS_URL}/api/areas`);
+  expect(areas.ok, `/api/areas → ${areas.status} (nginx anahtarı eklemiyor olabilir)`);
+  const scooters = await get(`${OPS_URL}/api/scooters`);
+  expect(scooters.ok, `/api/scooters → ${scooters.status}`);
+  return `${(await areas.json()).length} alan, ${(await scooters.json()).length} scooter`;
+});
 
-await step('sürücü anahtarı sadece konum gönderebilir', async () => {
-  // Sürücü uygulaması herkese açık; nginx'inin eklediği anahtarla loglar okunamamalı.
-  const driverLogs = await get(`${DRIVER_URL}/api/logs?limit=1`);
-  expect(driverLogs.status === 403, `sürücü /api/logs → ${driverLogs.status} (403 bekleniyordu)`);
-  const opsLogs = await get(`${OPS_URL}/api/logs?limit=1`);
-  expect(opsLogs.ok, `operasyon /api/logs → ${opsLogs.status}`);
+await step('sürücü: anahtar yok, giriş yapmadan hiçbir veri okunamaz', async () => {
+  // Sürücü uygulaması herkese açık; nginx'i anahtar eklememeli. Sürücü kendi hesabıyla girer.
+  const health = await get(`${DRIVER_URL}/api/health`);
+  expect(health.ok, `/api/health → ${health.status}`);
+  for (const path of ['/api/areas', '/api/scooters', '/api/logs?limit=1']) {
+    const res = await get(`${DRIVER_URL}${path}`);
+    expect(res.status === 401, `sürücü ${path} → ${res.status} (401 bekleniyordu; nginx anahtar ekliyor olabilir)`);
+  }
 });
 
 let browser;
@@ -91,19 +90,12 @@ if (browser) {
     return { page, errors };
   };
 
-  await step('sürücü: harita, scooter ve yol ağı yükleniyor', async () => {
+  await step('sürücü: giriş ekranı açılıyor', async () => {
+    // Veri yazmamak için giriş yapılmaz; harita ve scooter seçimi tarayıcı e2e testlerinde.
     const { page, errors } = await openPage();
     await page.goto(DRIVER_URL);
-    await page.waitForSelector('.leaflet-marker-icon.rider', { timeout: 8000 });
-    await page.waitForFunction(
-      () => document.querySelector('.panel')?.textContent.includes('yol üzerinde kalır'),
-      null,
-      {
-        timeout: 8000,
-      },
-    );
-    await page.getByRole('button', { name: 'Yakınlaştır' }).waitFor({ timeout: 3000 });
-    await page.getByRole('button', { name: 'Sürüşü başlat' }).waitFor({ timeout: 3000 });
+    await page.getByLabel('Kullanıcı adı').waitFor({ timeout: 8000 });
+    await page.getByRole('radio', { name: 'Üye ol' }).waitFor({ timeout: 3000 });
     expect(errors.length === 0, `konsol hatası: ${errors[0]}`);
     await page.close();
   });
@@ -115,6 +107,9 @@ if (browser) {
     await page.getByText(/Servis çalışıyor/).waitFor({ timeout: 8000 });
     await page.goto(`${OPS_URL}/#/logs`);
     await page.locator('table.logs').waitFor({ timeout: 5000 });
+    await page.goto(`${OPS_URL}/#/scooters`);
+    await page.getByRole('heading', { name: 'Scooterlar' }).waitFor({ timeout: 5000 });
+    await page.getByText('scooter-01').first().waitFor({ timeout: 5000 });
     expect(errors.length === 0, `konsol hatası: ${errors[0]}`);
     await page.close();
   });

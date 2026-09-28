@@ -14,4 +14,6 @@ export enum RealtimeEvent {
   POSITIONS = 'positions',
   /** Sunucu → herkes: yeni alan tanımlandı. */
   AREAS_CHANGED = 'areas-changed',
+  /** Sunucu → herkes: scooter eklendi, silindi, kiralandı ya da bırakıldı. */
+  SCOOTERS_CHANGED = 'scooters-changed',
 }

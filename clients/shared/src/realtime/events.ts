@@ -14,6 +14,8 @@ export const SocketEvent = {
   POSITIONS: 'positions',
   /** Sunucu → herkes: yeni alan tanımlandı. */
   AREAS_CHANGED: 'areas-changed',
+  /** Sunucu → herkes: scooter eklendi, silindi, kiralandı ya da bırakıldı. */
+  SCOOTERS_CHANGED: 'scooters-changed',
   /** Socket.IO'nun kendi bağlantı olayları. */
   CONNECT: 'connect',
   DISCONNECT: 'disconnect',

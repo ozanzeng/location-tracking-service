@@ -183,16 +183,49 @@ describe('useOutbox (cihaz gönderim kuyruğu)', () => {
     expect(sendLocations.mock.calls[1][0][0]).toEqual(point(100));
   });
 
-  test("401'de anahtar sorununu ne yapılacağıyla söyler; noktalar korunur, ayar düzelince gider", async () => {
-    sendLocations.mockRejectedValueOnce(new ApiError('Geçersiz API anahtarı', 401, null, 'r'));
-    const { result } = renderHook(() => useOutbox(true));
+  test("401'de oturumun düştüğünü bildirir; noktalar korunur, yeniden girişte gider", async () => {
+    sendLocations.mockRejectedValueOnce(new ApiError('Oturum geçersiz', 401, null, 'r'));
+    const onUnauthorized = vi.fn();
+    const { result } = renderHook(() => useOutbox(true, { onUnauthorized }));
     act(() => result.current.record(point(1)));
     await tick(1000);
     expect(result.current.log[0]).toMatchObject({ kind: 'error' });
-    expect(result.current.log[0].text).toMatch(/INGEST_API_KEYS=dev-driver-key/);
+    expect(result.current.log[0].text).toMatch(/Oturumun süresi doldu/);
+    expect(onUnauthorized).toHaveBeenCalledTimes(1);
     expect(result.current.pending).toBe(1);
     await tick(5000);
     expect(result.current.pending).toBe(0);
+  });
+
+  test.each([403, 409])(
+    '%i: scooter artık bu sürücüde değil; noktalar atılır ve kiralama kontrol edilir',
+    async (status) => {
+      sendLocations.mockRejectedValueOnce(new ApiError('Aktif kiralama yok', status, null, 'r'));
+      const onRentalRejected = vi.fn();
+      const { result } = renderHook(() => useOutbox(true, { onRentalRejected }));
+      act(() => result.current.record(point(1)));
+      await tick(1000);
+      expect(result.current.pending).toBe(0);
+      expect(result.current.log[0].text).toMatch(/kabul edilmedi/);
+      expect(onRentalRejected).toHaveBeenCalledTimes(1);
+      expect(sendLocations).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  test('drain: bekleyen konumlar gönderilince biter (zaman aşımını beklemeden)', async () => {
+    const { result, rerender } = renderHook(({ online }) => useOutbox(online), {
+      initialProps: { online: false },
+    });
+    act(() => result.current.record(point(1)));
+    let drained = false;
+    void result.current.drain().then(() => (drained = true));
+    await tick(1000);
+    expect(drained).toBe(false);
+    // Bırakırken uygulama bağlantıyı açar; konum gider ve drain biter.
+    rerender({ online: true });
+    await tick(1000);
+    expect(sendLocations).toHaveBeenCalledWith([point(1)]);
+    expect(drained).toBe(true);
   });
 
   test('ağ hatasında noktalar korunur ve 5 sn sonra tekrar denenir', async () => {

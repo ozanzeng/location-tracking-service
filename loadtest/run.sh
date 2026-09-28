@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # k6'yı compose ağında çalıştırır, ardından kuyruğun ne zaman boşaldığını ölçer.
 # Kullanım: PEAK_RPS=2000 WORKERS=2 ./loadtest/run.sh
+#           KEEP_DATA=1 ./loadtest/run.sh             (test verisini silme; sonuçları incelemek için)
 #           MOVE=teleport ./loadtest/run.sh        (en kötü durum; eski ölçümlerle karşılaştırma)
 #           PROFILE=soak SOAK_RPS=500 SOAK_DURATION=30m ./loadtest/run.sh
 #
@@ -70,6 +71,15 @@ else
   echo "Worker hızı (boşalma)  : ölçülemedi (yük bitince kuyruk boştu; worker'lar yüke yetişti)"
 fi
 echo "Ortalama işleme        : $((accepted / (drained - start))) konum/sn (alt sınır)"
+# Test filosu (load-*) ve ürettiği kayıtlar geliştirme verisinde kalmasın; kuyruk boşaldı.
+if [ "${KEEP_DATA:-0}" != "1" ]; then
+  docker compose exec -T postgres psql -U geofence -d geofence -qc \
+    "DELETE FROM area_logs WHERE user_id LIKE 'load-%'; DELETE FROM user_last_location WHERE user_id LIKE 'load-%';
+     DELETE FROM rentals WHERE scooter_id LIKE 'load-%'; DELETE FROM scooters WHERE id LIKE 'load-%';" >/dev/null \
+    && docker compose exec -T redis sh -c \
+      "redis-cli --scan --pattern 'geofence:device-log:load-*' | xargs -r -n 500 redis-cli del >/dev/null" \
+    && echo "Test verisi silindi     : load-* scooterlar, konumları, kayıtları ve cihaz günlükleri (KEEP_DATA=1 ile tutulur)"
+fi
 if [ "$rc" -eq 0 ]; then
   echo "k6 eşikleri            : geçti"
 else

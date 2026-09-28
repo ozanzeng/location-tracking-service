@@ -42,7 +42,11 @@ if [ "${SKIP_UI:-0}" != "1" ]; then
   run "Frontend: tarayıcı e2e"          in_clients npm run test:ui --silent
   # Tarayıcı testlerinin geliştirme verisine bıraktıkları
   docker compose exec -T postgres psql -U geofence -d geofence -qc \
-    "DELETE FROM areas WHERE name LIKE 'UI testi %'; DELETE FROM area_logs WHERE user_id LIKE 'ui-%'; DELETE FROM user_last_location WHERE user_id LIKE 'ui-%';" >/dev/null
+    "DELETE FROM areas WHERE name LIKE 'UI testi %'; DELETE FROM area_logs WHERE user_id LIKE 'ui-%'; DELETE FROM user_last_location WHERE user_id LIKE 'ui-%';
+     DELETE FROM rentals WHERE scooter_id LIKE 'ui-%' OR rider_id IN (SELECT id FROM riders WHERE username LIKE 'ui-%');
+     DELETE FROM riders WHERE username LIKE 'ui-%'; DELETE FROM scooters WHERE id LIKE 'ui-%';" >/dev/null
+  docker compose exec -T redis sh -c \
+    "redis-cli --scan --pattern 'geofence:device-log:ui-*' | xargs -r -n 500 redis-cli del >/dev/null"
 fi
 
 # Sonuç ve süre başta: Türkçe karakterler printf genişliğini bozduğu için ad en sonda.

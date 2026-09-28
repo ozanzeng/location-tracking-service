@@ -14,8 +14,15 @@ import {
 import type { Server, Socket } from 'socket.io';
 import { APP_CONFIG, type AppConfig } from '../config/configuration.js';
 import { USER_ID_MAX_LENGTH } from '../config/limits.js';
-import { API_KEY_HEADER, apiKeyScope } from '../security/api-key.guard.js';
-import { KeyScope } from '../security/key-scope.enum.js';
+import { RentalsService } from '../fleet/rentals.service.js';
+import { API_KEY_HEADER, isValidApiKey } from '../security/auth.guard.js';
+import {
+  isRider,
+  parseBearer,
+  type Principal,
+  SERVICE_PRINCIPAL,
+} from '../security/principal.js';
+import { RiderSessions } from '../security/rider-sessions.js';
 import { PositionBuffer } from './position-buffer.js';
 import {
   isUserRoom,
@@ -33,9 +40,14 @@ interface SubscribePayload {
   userId?: string;
 }
 
+interface ClientData {
+  /** El sıkışmadaki kimlik doğrulaması; mesajlar bunu bekler (bağlantı anında gelebilirler). */
+  auth?: Promise<Principal | null>;
+}
+
 /**
  * Socket.IO tarafı: istemciler odalara abone olur (operasyon: monitor ya da yalnızca olaylar için
- * events, sürücü: kendi kullanıcısı).
+ * events, sürücü: kiraladığı scooter).
  * Alan olayları anında gider; konumlar tamponlanıp belirli aralıklarla toplu gönderilir.
  */
 // CORS ayarı CorsIoAdapter'dan gelir (setup-app.ts).
@@ -52,6 +64,8 @@ export class RealtimeGateway
   constructor(
     @Inject(APP_CONFIG) private readonly config: AppConfig,
     private readonly subscriber: RealtimeSubscriber,
+    private readonly sessions: RiderSessions,
+    private readonly rentals: RentalsService,
   ) {}
 
   onModuleInit(): void {
@@ -60,6 +74,11 @@ export class RealtimeGateway
     // Alan listesi herkese açık bilgi; tüm bağlı istemcilere iletilir.
     this.subscriber.onAreasChanged((message) =>
       this.server.emit(RealtimeEvent.AREAS_CHANGED, message),
+    );
+    // Sürücülerin seçim ekranı ve operasyonun filo listesi yenilensin. Mesajda kimin kiraladığı
+    // yok, sadece scooter kimliği.
+    this.subscriber.onFleetChanged((message) =>
+      this.server.emit(RealtimeEvent.SCOOTERS_CHANGED, message),
     );
     this.flushTimer = setInterval(
       () => this.flushPositions(),
@@ -71,30 +90,51 @@ export class RealtimeGateway
     if (this.flushTimer) clearInterval(this.flushTimer);
   }
 
-  /** HTTP ile aynı anahtar kuralı; geçersizse bağlantı hemen kapatılır. */
+  /**
+   * HTTP ile aynı kimlik kuralı: sürücü oturumu (auth.token) ya da API anahtarı. Geçersizse
+   * bağlantı kapatılır.
+   */
   handleConnection(client: Socket): void {
+    const data = client.data as ClientData;
+    data.auth = this.authenticate(client).then(
+      (principal) => {
+        if (!principal) client.disconnect(true);
+        return principal;
+      },
+      () => {
+        // Oturum okunamadı (Redis erişilemiyor): istemci yeniden bağlanır.
+        client.disconnect(true);
+        return null;
+      },
+    );
+  }
+
+  private async authenticate(client: Socket): Promise<Principal | null> {
+    const token = parseBearer(
+      client.handshake.auth?.token
+        ? `Bearer ${client.handshake.auth.token}`
+        : client.handshake.headers.authorization,
+    );
+    if (token) return this.sessions.resolve(token);
     const provided =
       client.handshake.headers[API_KEY_HEADER] ?? client.handshake.auth?.apiKey;
-    const scope = apiKeyScope(this.config.security, provided);
-    if (!scope) {
-      client.disconnect(true);
-      return;
-    }
-    (client.data as { scope?: KeyScope }).scope = scope;
+    return isValidApiKey(this.config.security.apiKeys, provided)
+      ? SERVICE_PRINCIPAL
+      : null;
   }
 
   @SubscribeMessage(RealtimeEvent.SUBSCRIBE)
-  handleSubscribe(
+  async handleSubscribe(
     @ConnectedSocket() client: Socket,
     @MessageBody() payload: SubscribePayload,
   ) {
-    // Tüm filonun yayını (konumlar ya da yalnızca olaylar) tam yetki ister; sürücü anahtarı
-    // sadece kullanıcı odasına girer.
-    const scope = (client.data as { scope?: KeyScope }).scope;
-    if ((payload?.monitor || payload?.events) && scope !== KeyScope.FULL) {
+    const principal = await (client.data as ClientData).auth;
+    if (!principal) return { ok: false, error: 'kimlik doğrulanamadı' };
+    // Tüm filonun yayını (konumlar ya da yalnızca olaylar) API anahtarı ister.
+    if ((payload?.monitor || payload?.events) && isRider(principal)) {
       return {
         ok: false,
-        error: 'filo aboneliği (monitor, events) tam yetkili anahtar ister',
+        error: 'filo aboneliği (monitor, events) API anahtarı ister',
       };
     }
     if (payload?.monitor) void client.join(MONITOR_ROOM);
@@ -104,11 +144,12 @@ export class RealtimeGateway
       payload.userId.length <= USER_ID_MAX_LENGTH
     ) {
       const room = userRoom(payload.userId);
-      // Sürücü anahtarıyla açılan bağlantı aynı anda tek kullanıcı odasında durur: yeni
-      // kullanıcıya abone olunca öncekinden çıkar. Tek bağlantıyla tüm filo dinlenemez.
-      // Birden çok bağlantı açan biri yine başka kullanıcıları dinleyebilir; bunun çözümü
-      // userId'nin imzalı token'dan alınmasıdır (README, kapsam dışı).
-      if (scope === KeyScope.INGEST) {
+      // Sürücü sadece kiraladığı scooter'ı dinler; aynı anda tek odada durur.
+      if (isRider(principal)) {
+        const rented = await this.rentals.activeScooter(principal.riderId);
+        if (rented !== payload.userId) {
+          return { ok: false, error: `${payload.userId} size kiralı değil` };
+        }
         for (const joined of client.rooms) {
           if (isUserRoom(joined) && joined !== room) void client.leave(joined);
         }
@@ -132,7 +173,7 @@ export class RealtimeGateway
   }
 
   private onUpdate(message: GeofenceUpdateMessage): void {
-    this.positions.add(message.position);
+    if (message.position) this.positions.add(message.position);
     for (const event of message.events) {
       this.server
         .to([MONITOR_ROOM, EVENTS_ROOM, userRoom(event.userId)])

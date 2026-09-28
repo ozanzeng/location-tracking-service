@@ -6,12 +6,11 @@ const API = process.env.API_PROXY_TARGET ?? 'http://localhost:3000';
 
 /**
  * İki uygulamanın ortak Vite ayarı: @shared takma adı ve API proxy'si. Anahtar tarayıcı
- * koduna gömülmez; geliştirme proxy'si ekler (üretimde nginx). Sürücü uygulaması sadece
- * konum gönderebilen anahtarı kullanır.
+ * koduna gömülmez; operasyon için geliştirme proxy'si ekler (üretimde nginx). Sürücü
+ * uygulaması anahtar kullanmaz: sürücü hesabıyla giriş yapar.
  */
 export function clientConfig(port: number, app: 'ops' | 'driver') {
-  const API_KEY =
-    app === 'driver' ? (process.env.DRIVER_API_KEY ?? 'dev-driver-key') : (process.env.API_KEY ?? 'dev-api-key');
+  const headers: Record<string, string> = app === 'ops' ? { 'x-api-key': process.env.API_KEY ?? 'dev-api-key' } : {};
   return defineConfig({
     plugins: [react()],
     resolve: {
@@ -24,9 +23,9 @@ export function clientConfig(port: number, app: 'ops' | 'driver') {
         '/api': {
           target: API,
           rewrite: (path) => path.replace(/^\/api/, ''),
-          headers: { 'x-api-key': API_KEY },
+          headers,
         },
-        '/socket.io': { target: API, ws: true, headers: { 'x-api-key': API_KEY } },
+        '/socket.io': { target: API, ws: true, headers },
       },
     },
   });

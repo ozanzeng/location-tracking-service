@@ -1,16 +1,18 @@
-import type { Area } from '@shared/api/types';
+import type { Area, Scooter } from '@shared/api/types';
 import { LogStatusFilter, type LogFilters } from './logFilters';
 
 interface Props {
   value: LogFilters;
   areas: Area[];
+  /** Filodaki (kayıtlı) scooterlar; henüz yüklenmediyse null. */
+  scooters: Scooter[] | null;
   onChange: (value: LogFilters) => void;
   onSubmit: () => void;
   onReset: () => void;
 }
 
-/** Giriş kayıtları filtreleri: kullanıcı, alan, durum ve giriş zamanı aralığı. */
-export function LogFiltersForm({ value, areas, onChange, onSubmit, onReset }: Props) {
+/** Giriş kayıtları filtreleri: scooter, alan, durum ve giriş zamanı aralığı. */
+export function LogFiltersForm({ value, areas, scooters, onChange, onSubmit, onReset }: Props) {
   const set = <K extends keyof LogFilters>(key: K, v: LogFilters[K]) => onChange({ ...value, [key]: v });
   return (
     <form
@@ -21,8 +23,19 @@ export function LogFiltersForm({ value, areas, onChange, onSubmit, onReset }: Pr
       }}
     >
       <label>
-        Kullanıcı
-        <input value={value.userId} placeholder="scooter-42" onChange={(e) => set('userId', e.target.value)} />
+        Scooter
+        <select value={value.userId} onChange={(e) => set('userId', e.target.value)}>
+          <option value="">Tüm scooterlar</option>
+          {scooters?.map((s) => (
+            <option key={s.id} value={s.id}>
+              {s.name !== s.id ? `${s.id} · ${s.name}` : s.id}
+            </option>
+          ))}
+          {/* Filodan çıkarılmış bir scooter detay panelinden seçildiyse de görünsün. */}
+          {value.userId && scooters && !scooters.some((s) => s.id === value.userId) ? (
+            <option value={value.userId}>{value.userId} (filoda değil)</option>
+          ) : null}
+        </select>
       </label>
       <label>
         Alan

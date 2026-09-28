@@ -2,9 +2,11 @@
 
 Mobil uygulamadaki kullanıcıların yaklaşık 5 saniyede bir gönderdiği konumları alır. Konumun tanımlı polygon alanlardan birine girip girmediğini tespit eder ve girişi kaydeder; kullanıcı alandan çıktığında aynı kayda çıkış zamanını da ekler. Trafik artışını karşılayacak şekilde tasarlandı: istekler kuyruğa alınır, ayrı worker süreçleri işler.
 
+Konumu gönderen "kullanıcı" bir scooter'dır ve filoya kayıtlı olmalıdır; kayıtsız kimlikten gelen konum kabul edilmez. Sürücüler kullanıcı adı ve şifreyle üye olup giriş yapar, boştaki bir scooter'ı kiralar; konumlar kiralanan scooter adına gider. Uzun süre konum göndermeyen scooter'ın açık girişleri son sinyal anıyla kapatılır ve kiralaması biter (bkz. "Scooterlar, sürücü hesapları ve kiralama").
+
 Yanında servisle veri alışverişi yapan iki istemci de var (case kapsamı dışında, demo için):
-- **Sürücü uygulaması:** Gerçek bir cihaz gibi 5 saniyede bir konum gönderir; bir bölgeye girip çıkınca beklemeden gönderir. Çevrimdışıyken konumları biriktirir, bağlanınca toplu yollar.
-- **Operasyon uygulaması:** Canlı harita, giriş kayıtları ve alan yönetimi.
+- **Sürücü uygulaması:** Giriş/üyelik, boştaki scooter'ı seçme (hepsi doluysa "Boşta scooter yok"), sürüş. Gerçek bir cihaz gibi 5 saniyede bir konum gönderir; bir bölgeye girip çıkınca beklemeden gönderir. Çevrimdışıyken konumları biriktirir, bağlanınca toplu yollar.
+- **Operasyon uygulaması:** Canlı harita, giriş kayıtları, alan yönetimi (çiz, düzenle, sil) ve filo yönetimi (scooter ekle, sil; kimde, son sinyal).
 
 | | |
 |---|---|
@@ -19,12 +21,14 @@ Yanında servisle veri alışverişi yapan iki istemci de var (case kapsamı dı
 
 ```bash
 docker compose up -d --build        # postgis, redis, migrate, api, 2 worker, ops, driver
-cd api && npm ci && npm run seed    # Kadıköy/Moda çevresinde 10 örnek alan
+node api/scripts/seed.mjs           # Kadıköy/Moda çevresinde 10 örnek alan (bağımlılık gerektirmez)
 ```
 
-- API ve Swagger: http://localhost:3000/docs. Yerel demo anahtarları: tam yetkili `dev-api-key` (operasyon, betikler) ve sadece konum gönderebilen `dev-driver-key` (sürücü uygulaması). Swagger'da "Authorize" ile girilir.
+Migration kurulumda 5 scooter ekler (`scooter-01` … `scooter-05`).
+
+- API ve Swagger: http://localhost:3000/docs. Yerel demo anahtarı: `dev-api-key` (operasyon, betikler, mobil backend). Sürücü uç noktaları için önce `POST /auth/register` ya da `/auth/login`; dönen token Swagger'da "Authorize" → `rider` alanına girilir.
 - Operasyon uygulaması: http://localhost:8080
-- Sürücü uygulaması: http://localhost:8081. İkisini yan yana açıp sürücüde "Sürüşü başlat" deyin.
+- Sürücü uygulaması: http://localhost:8081. Üye olun, bir scooter seçin ve "Sürüşü başlat" deyin; operasyon uygulamasını yanında açık tutun.
 - Sağlık ve kuyruk durumu: http://localhost:3000/health
 - Metrikler: http://localhost:3000/metrics (API), worker'larda `:9100/metrics`
 
@@ -34,7 +38,8 @@ cd api && npm ci && npm run seed    # Kadıköy/Moda çevresinde 10 örnek alan
 
 ```mermaid
 flowchart LR
-  C[Sürücü uygulaması] -- POST /locations(/batch) --> API
+  C[Sürücü uygulaması] -- giriş, scooter kiralama --> API
+  C -- POST /locations(/batch)<br/>Bearer oturum --> API
   API -- 202 + kullanıcının şeridine ekle --> R[(Redis / BullMQ<br/>64 kullanıcı şeridi)]
   R --> W1[Worker 1]
   R --> W2[Worker N]
@@ -46,8 +51,8 @@ flowchart LR
   API -- GET /logs, /areas --> PG
 ```
 
-- **API** (`api/src/main.ts`): İsteği doğrular, konumu kuyruğa ekler ve hemen `202` döner. Veritabanına yazmaz, bu yüzden ani yüklerde de hızlı kalır.
-- **Worker** (`api/src/worker.ts`): Aynı kod tabanından, HTTP sunucusu olmadan çalışır. `docker compose up --scale worker=N` ile yatayda çoğaltılır. Kuyruk kullanıcılara göre şeritlere bölünmüştür: aynı kullanıcının işleri tek tek, geliş sırasıyla işlenir, farklı şeritler paralel ilerler (bkz. Tasarım kararları).
+- **API** (`api/src/main.ts`): İsteği doğrular, gönderenin o scooter için yetkisine bakar, konumu kuyruğa ekler ve hemen `202` döner. Konum kabulünde veritabanına gitmez (kayıtlı scooter listesi bellekte, sürücünün kiralaması Redis'te önbellekli), bu yüzden ani yüklerde de hızlı kalır.
+- **Worker** (`api/src/worker.ts`): Aynı kod tabanından, HTTP sunucusu olmadan çalışır. `docker compose up --scale worker=N` ile yatayda çoğaltılır. Kuyruk kullanıcılara göre şeritlere bölünmüştür: aynı kullanıcının işleri tek tek, geliş sırasıyla işlenir, farklı şeritler paralel ilerler (bkz. Tasarım kararları). Ayrıca 30 saniyede bir sinyali kesilen scooter'ları tarar.
 - **Realtime:** Worker'lar işlenmiş konumu Redis'e yayınlar. Her API instance kendi aboneliğiyle Socket.IO client'larına iletir; bu sayede API birden fazla instance'a çoğaltıldığında da çalışır.
 
 ## API
@@ -59,15 +64,31 @@ flowchart LR
 | `GET /logs` | Alan girişleri, en yeni girişten eskiye. Filtreler: `userId`, `areaId`, `active` (hâlâ içeride mi), `from`/`to` (giriş zamanı aralığı, `timestamp` ile aynı biçim). Sayfalama: `limit`, `cursor`. |
 | `POST /areas` | `{ name, type, geometry }`. Geometri GeoJSON Polygon, koordinatlar `[boylam, enlem]`. |
 | `GET /areas` | Tanımlı alanlar. Opsiyonel `type` filtresi. |
+| `PATCH /areas/:id` | `{ name?, type?, geometry? }`. Geometri değişirse son konumu yeni şeklin dışında kalan scooterların açık girişleri kapanır (`exitReason: AREA_CHANGED`). |
+| `DELETE /areas/:id` | Yumuşak silme: alan listede ve konum işlemede yok sayılır, giriş kayıtları kalır; açık girişler kapanır (`exitReason: AREA_REMOVED`). |
 | `GET /locations/latest` | Son bilinen konumlar (canlı izleme ekranının ilk yüklemesi için). |
+| `GET /scooters` | Filo ve durumları (`AVAILABLE`, `IN_USE`), son sinyal zamanı. Operasyon kimin kullandığını da görür; sürücü sadece kendisinin olup olmadığını. |
+| `GET /scooters/:id` | Operasyon için scooter detayı: durum, kimde, son konum, içinde bulunduğu alanlar, son 10 kiralama ve cihaz günlüğü (sunucunun işlediği son konumlar). Filodan çıkarılmış kimlikler için de konumu varsa döner. |
+| `POST /scooters` | `{ id, name? }`. Filoya scooter ekler; `id` konumlardaki `userId`'dir. Aynı kimlikle silinmiş scooter geri gelir. |
+| `DELETE /scooters/:id` | Scooter'ı filodan çıkarır (yumuşak silme; giriş kayıtları kalır). Kullanımdaysa `409`. |
+| `POST /auth/register`, `POST /auth/login` | Sürücü hesabı: `{ username, password }`. `{ token, expiresIn, rider }` döner. |
+| `POST /auth/logout`, `GET /auth/me` | Oturumu kapatır; oturumdaki sürücü. |
+| `POST /rentals` | `{ scooterId }`: sürücü scooter'ı kiralar. Kullanımdaysa ya da sürücünün zaten bir scooter'ı varsa `409`. |
+| `GET /rentals/current`, `POST /rentals/current/end` | Aktif kiralama (sayfa yenilenince sürüşe devam için); sürüşü bitirip scooter'ı bırakma. |
 | `GET /health` | DB, Redis ve kuyruk sayaçları. Anahtar istemez. |
 | `GET /metrics` | Prometheus metrikleri. Anahtar istemez; dışarıya açılmamalı. |
 
-Health ve metrics dışındaki tüm uç noktalar `x-api-key` başlığı ister. Sürücü anahtarı (`INGEST_API_KEYS`) sadece `POST /locations`, `POST /locations/batch` ve `GET /areas`'a erişir. Olası hata yanıtları:
-- `400`: doğrulama hatası
-- `401`: anahtar eksik veya yanlış
-- `403`: sürücü anahtarı bu uç noktaya yetkili değil
-- `429`: kullanıcı başına dakikalık sınır aşıldı
+İki tür kimlik var:
+- **API anahtarı** (`x-api-key`): mobil backend, gateway, operasyon paneli, betikler. Her uç noktaya erişir; `/rentals` ve `/auth/me` hariç (bunlar kimin adına yapıldığını bilmek zorunda). Kayıtlı her scooter için konum gönderebilir; park halindeki scooter da konumunu bildirir.
+- **Sürücü oturumu** (`Authorization: Bearer <token>`): sadece kendi işleri. Konum gönderir (sadece kiraladığı scooter için), alan ve scooter listesini okur, kiralar ve bırakır. Loglar, alan oluşturma ve filo yönetimi `403`.
+
+Olası hata yanıtları:
+- `400`: doğrulama hatası ya da kayıtlı olmayan scooter
+- `401`: anahtar ya da oturum eksik veya geçersiz; yanlış kullanıcı adı ya da şifre
+- `403`: sürücü oturumu bu uç noktaya yetkili değil ya da scooter bu sürücüye kiralı değil
+- `404`: scooter ya da aktif kiralama yok
+- `409`: scooter kullanımda, kullanıcı adı alınmış, sürücünün aktif kiralaması yok (konum gönderirken)
+- `429`: kullanıcı başına dakikalık konum sınırı ya da başarısız giriş sınırı aşıldı
 - `503`: kuyruk dolu
 
 `429` ve `503` yanıtları `Retry-After` başlığıyla gelir; istemci o kadar saniye bekleyip tekrar dener.
@@ -81,8 +102,8 @@ curl -X POST localhost:3000/areas -H "$H" -H 'content-type: application/json' -d
   "geometry": {"type": "Polygon", "coordinates": [[[29.02,40.98],[29.03,40.98],[29.03,40.99],[29.02,40.99],[29.02,40.98]]]}
 }'
 curl -X POST localhost:3000/locations -H "$H" -H 'content-type: application/json' \
-  -d '{"userId": "scooter-1", "lat": 40.985, "lng": 29.025, "timestamp": "2026-09-26T10:00:00Z"}'
-curl -H "$H" 'localhost:3000/logs?userId=scooter-1'
+  -d '{"userId": "scooter-01", "lat": 40.985, "lng": 29.025, "timestamp": "2026-09-26T10:00:00Z"}'
+curl -H "$H" 'localhost:3000/logs?userId=scooter-01'
 ```
 
 `GET /logs` yanıtı:
@@ -90,11 +111,29 @@ curl -H "$H" 'localhost:3000/logs?userId=scooter-1'
 ```json
 {
   "data": [
-    { "id": "2", "userId": "scooter-1", "areaId": "…", "areaName": "Moda Sahil", "areaType": "NO_RIDE",
-      "entryTime": "2026-09-26T10:00:00.000Z", "exitTime": null }
+    { "id": "2", "userId": "scooter-01", "areaId": "…", "areaName": "Moda Sahil", "areaType": "NO_RIDE",
+      "entryTime": "2026-09-26T10:00:00.000Z", "exitTime": null, "exitReason": null }
   ],
   "nextCursor": null
 }
+```
+
+`exitReason` normal çıkışta (alan dışından konum geldi) `null`. Diğer değerler:
+- `SIGNAL_LOST`: scooter uzun süre konum göndermedi, kayıt son sinyal anıyla kapatıldı (gerçek çıkış bundan sonra olabilir).
+- `AREA_CHANGED`: alanın şekli değişti ve scooter'ın son konumu yeni şeklin dışında kaldı.
+- `AREA_REMOVED`: alan silindi.
+
+Sürücü akışı:
+
+```bash
+TOKEN=$(curl -s -X POST localhost:3000/auth/register -H 'content-type: application/json' \
+  -d '{"username": "ali", "password": "guclu-bir-sifre"}' | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')
+B="authorization: Bearer $TOKEN"
+curl -H "$B" localhost:3000/scooters                                   # boştakiler: status AVAILABLE
+curl -X POST localhost:3000/rentals -H "$B" -H 'content-type: application/json' -d '{"scooterId": "scooter-02"}'
+curl -X POST localhost:3000/locations -H "$B" -H 'content-type: application/json' \
+  -d "{\"userId\": \"scooter-02\", \"lat\": 40.985, \"lng\": 29.025, \"timestamp\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
+curl -X POST localhost:3000/rentals/current/end -H "$B"
 ```
 
 ## Teknoloji tercihleri
@@ -111,8 +150,12 @@ curl -H "$H" 'localhost:3000/logs?userId=scooter-1'
 - **Eski konumlar atlanır.** Bir kullanıcının son işlenen konumundan daha eski bir konum gelirse, örneğin ağda gecikmişse, durumu geriye götürmesin diye yok sayılır.
 - **Alanlar çakışabilir.** Bir konum birden fazla alanın içindeyse her alan için ayrı giriş kaydı açılır.
 - **Polygon delikleri desteklenir.** GeoJSON'daki iç halkalar (hole) alanın dışı sayılır. Tam sınır çizgisi üzerindeki nokta içeride sayılmaz (`ST_Contains`); gerçek GPS verisinde bunun pratik bir etkisi yok.
-- **`userId` opak bir kimliktir.** Kullanıcı yönetimi bu servisin sorumluluğunda değil; kimliğin doğruluğu çağıran tarafa (mobil backend veya gateway) bırakıldı.
+- **`userId` bir scooter kimliğidir ve kayıtlı olmalıdır.** Konumu gönderen cihaz scooter'dır; sürücü değişse de kayıtlar scooter'a göre tutulur (hangi alanda hangi scooter vardı). Kayıtsız kimlikten gelen konum `400` alır. Sürücü uygulaması kimliği gövdede gönderir ama sunucu onu oturumdaki kiralamayla karşılaştırır; güvenilen servis (API anahtarı) kayıtlı her scooter için gönderebilir, park halindeki scooter'ın kendi cihazı gibi.
+- **Kiralanmamış scooter da konum gönderebilir.** Gerçek filoda scooter park halindeyken de konumunu bildirir; bu yol sadece API anahtarıyla açık.
+- **Scooter durumu elle girilmez.** Boşta ya da kullanımda olması aktif kiralamadan hesaplanır. "Bakımda" gibi elle verilen bir durum şimdilik yok (bkz. kapsam dışı).
+- **Sessizlik sinyal kaybıdır.** Cihaz 5 sn'de bir gönderir; 10 dakika (`SIGNAL_LOSS_TIMEOUT_MS`) hiç konum gelmezse scooter'ın izi kaybedilmiş sayılır: açık girişleri son sinyal anıyla kapatılır, kiralaması biter.
 - **Alanlar az sayıdadır ve seyrek değişir.** Binler mertebesinde olması beklenir, bu yüzden `GET /areas` sayfalanmaz. Log tablosu ise hızla büyüyeceği için sayfalanır.
+- **Alan geçmişi silinmez.** Silinen alanın giriş kayıtları denetim ve raporlama için kalır; alan sadece listeden ve konum işlemeden çıkar.
 - **ORM kullanımı:** Alan kaydı ve okuma TypeORM repository ile yapılır. Konum işleme ve log sorguları ise performans için TypeORM üzerinden ham SQL ile yazıldı; tek sorguda okuma, CTE ile tek sorguda yazma ve keyset sayfalama ORM sorgu kurucusuyla ifade edilemiyor.
 
 ## Tasarım kararları
@@ -167,6 +210,41 @@ Bir iş başarısız sayılmadan önce 3 kez takılabilir (`WORKER_MAX_STALLED_C
 
 **Kuyruk dolarsa yük reddedilir (backpressure).** Worker'lar uzun süre yetişemezse kuyruk sınırsız büyüyüp Redis belleğini doldururdu. Tüm şeritlerde bekleyen iş sayısı `QUEUE_MAX_BACKLOG`'u (varsayılan 200.000) aşınca API yeni konumları `503 Retry-After: 5` ile reddeder. Kuyruk derinliği her istekte sorulmaz; saniyede bir arka planda okunur, böylece sıcak yola ek bir Redis çağrısı eklenmez.
 
+### Scooterlar, sürücü hesapları ve kiralama
+
+**Neden.** İlk sürümde her kimlik kabul ediliyordu ve sürücü uygulaması rastgele bir scooter kimliği üretiyordu; bir anahtarı bilen herkes başka bir kimlik adına konum gönderebiliyordu. Gerçek bir ürün için filo bilinmeli, sürücü kim olduğunu kanıtlamalı ve bir scooter aynı anda tek kişide olmalı.
+
+**Veri modeli** (migration `FleetAndRiders`):
+- `scooters`: `id` (konumlardaki `userId`), `name`, `deleted_at`. Kurulumda 5 scooter gelir. Silme yumuşaktır: silinen scooter konum gönderemez ve kiralanamaz, ama giriş kayıtları ve kiralama geçmişi kalır; aynı kimlikle tekrar eklenince geri gelir.
+- `riders`: `username` (küçük harfle, benzersiz), `password_hash` (Argon2id).
+- `rentals`: `scooter_id`, `rider_id`, `started_at`, `ended_at`, `end_reason` (`RETURNED` ya da `SIGNAL_LOST`). İki kısmi unique index: bir scooter'ın ve bir sürücünün en fazla bir açık kiralaması olabilir. İki sürücü aynı scooter'a aynı anda basarsa veritabanı birini reddeder (`409`); e2e testi 5 sürücüyü aynı scooter'a aynı anda gönderir ve sadece birinin aldığını doğrular.
+- Kiralama ile silme yarışmaz: kiralama scooter satırını `FOR SHARE`, silme `FOR UPDATE` ile kilitler. Silme kiralamadan önce biterse kiralama scooter'ı silinmiş bulur (`404`), sonra biterse kiralamayı görür (`409`).
+
+**Konum kabulü veritabanına gitmez.** Kayıtlı scooter listesi her API instance'ının belleğindedir (`ScooterRegistry`): açılışta yüklenir, scooter eklenince ya da silinince Redis üzerinden duyuruyla (`<önek>:fleet`) tüm instance'larda yenilenir, duyuru kaçarsa dakikada bir. Veritabanı sonradan erişilemezse bilinen son liste kullanılır; açılışta hiç yüklenemediyse konumlar `503` alır (kayıtsız kimlik kabul etmektense beklemek). Sürücünün kiraladığı scooter Redis'te 30 sn önbelleklidir; kiralama başlarken ve biterken hemen güncellenir. Böylece API'nin "konumu veritabanına dokunmadan kabul et" özelliği korunur.
+
+**Sinyal kaybı.** Worker 30 sn'de bir (`SIGNAL_LOSS_CHECK_MS`) 10 dakikadır (`SIGNAL_LOSS_TIMEOUT_MS`) konum göndermeyen scooter'ları arar (`api/src/geofence/signal-loss.sweeper.ts`):
+- Açık giriş kayıtları son sinyal anıyla kapatılır ve `exit_reason = SIGNAL_LOST` ile işaretlenir. Önceden pili biten ya da uygulaması kapanan cihaz sonsuza kadar "içeride" görünüyordu: bir yük testinden sonra 3.515 açık kaydın 3.509'u 20 dakikadır sessiz scooter'lara aitti. Yeni sürüm açılınca ilk tur hepsini kapattı.
+- Aktif kiralama son sinyal anıyla (hiç konum yoksa başlangıç anıyla) biter; scooter başka sürücülere açılır. Sürüşü bitirmeden uygulamayı kapatan sürücü scooter'ı kilitli bırakamaz.
+- Kullanıcı kilidi (konum işlemeyle aynı advisory lock) denenir, beklenmez: o an konumu işlenen ya da başka worker'ın kapattığı scooter atlanır. Her worker tarar, lider seçimi gerekmez; bir kayıt bir kez kapanır. Birikmiş iş 500'lük gruplarla aynı turda erir.
+- Cihaz geri dönerse ya da çevrimdışı biriken konumları sonradan gelirse içindeki alanlar için yeni giriş açılır; aradaki boşluğun sinyal kaybı olduğu kapanan kaydın işaretinden anlaşılır. Kiralama bittiği için sürücünün bu konumları `409` alır; uygulama kiralamanın bittiğini söyleyip seçim ekranına döner.
+
+**Alan düzenleme ve silme.** Giriş kayıtları hep bir konumdan doğar; alan değişince kayıtların tutarlı kalması için (migration `AreaEdits`, `api/src/areas/areas.service.ts`):
+- **Ad ya da tip değişince** kayıtlara dokunulmaz: kayıtlar alana okunurken bağlanır, eski girişler de yeni adla görünür.
+- **Şekil değişince** sadece son konumu yeni şeklin dışında kalan scooterların açık girişleri kapanır (`AREA_CHANGED`); içeride kalanların ziyareti bölünmez. Şekil genişleyip bir scooter'ı içine alırsa giriş, o scooter'ın sonraki konumuyla açılır: giriş zamanı hep cihazdan gelen konumdur, alanın düzenlendiği an değil.
+- **Silme yumuşaktır** (`deleted_at`): alan listede ve konum işlemede yok sayılır, açık girişler kapanır (`AREA_REMOVED`), geçmiş kayıtlar alanın adıyla kalır. Gerçek silme `area_logs` yabancı anahtarının `ON DELETE CASCADE`'i yüzünden geçmişi de silerdi.
+- Kapanan girişlerin çıkış zamanı değişikliğin anıdır (sunucu saati); cihaz saati biraz ileride olabildiği için girişten önceye düşmez. Kapanışlar tek transaction'da yapılır, çıkış olayları canlı yayına gider, alan listesi tüm istemcilere duyurulur (`areas-changed`).
+- Değişiklikle aynı anda işlenen bir konum eski şekle göre giriş açabilir (worker alanı kilitlemez; sıcak yola kilit eklememek için). Durum kendini düzeltir: scooter'ın sonraki konumu yeni şeklin dışındaysa normal çıkış yazılır, hiç konum gelmezse sinyal kaybı taraması kapatır.
+
+**Sunucu tarafı cihaz günlüğü.** Operasyon bir scooter'ın son dakikalarda ne gönderdiğini ve sunucunun ne yaptığını görebilsin diye worker, işlediği her konumu scooter başına Redis'te bir listeye yazar (`api/src/fleet/device-log.ts`): API'ye ulaştığı an, işlendiği an, cihaz saati, konum, sonuç (işlendi ya da daha yeni bir konum işlenmiş olduğu için atlandı), girilen ve çıkılan alanlar, istek kimliği.
+- Liste sınırlı ve süreli: scooter başına son 50 konum (`DEVICE_LOG_SIZE`, 5 sn'lik gönderimde ~4 dakika), son konumdan 24 saat sonra silinir (`DEVICE_LOG_TTL_HOURS`). 5.000 aktif scooter yaklaşık 40 MB tutar.
+- Konum geçmişi veritabanına yazılmaz (veri modeli bilinçli olarak sadece girişleri ve son konumu saklar); bu kayıt kalıcı değil, kısa süreli bir teşhis aracıdır.
+- Worker iş başına tek Redis isteği atar (iş toplu konum da taşısa); yazılamazsa konum işleme etkilenmez, günlükte boşluk kalır. API'nin reddettiği istekler (kayıtsız scooter, kiralama yok, rate limit) worker'a ulaşmadığı için günlükte görünmez; onlar API loglarında istek kimliğiyle bulunur.
+- Kiralama geçmişi için `rentals (scooter_id, started_at DESC)` index'i eklendi (migration `RentalHistoryIndex`, `CONCURRENTLY`).
+
+**Sürücü uygulamasında bırakma.** "Sürüşü bitir" (sadece park alanında) önce bekleyen konumları gönderir (bağlantı kesikse açar, en fazla 10 sn bekler), sonra kiralamayı bitirir. Çevrimdışı biriken konumlar scooter bırakılmadan kaybolmaz; tarayıcı testi istek sırasını doğrular.
+
+**nginx, API'yi istek anında çözer.** Demo istemcilerinin nginx'i API adresini Docker DNS'inden en fazla 10 sn önbellekle çözer. Önceden adres açılışta bir kez çözülüyordu: API container'ı yeniden oluşturulunca (deploy) iki arayüz nginx yeniden başlatılana kadar `502` alıyordu (bu çalışma sırasında görüldü).
+
 ## Veritabanı
 
 Tasarım kararları, 3 milyon giriş kaydı ve 50 bin kullanıcılı ayrı bir bench veritabanında ölçülerek verildi. Aynı ölçümler `./loadtest/db-bench/run.sh` ile tekrarlanabilir.
@@ -198,14 +276,18 @@ Tasarım kararları, 3 milyon giriş kaydı ve 50 bin kullanıcılı ayrı bir b
 ## Güvenlik
 
 - **API anahtarı:** Servisin mobil uygulamanın backend'i veya bir API gateway tarafından çağrıldığı varsayıldı. İstemciler `x-api-key` ile doğrulanır. Anahtarlar sabit süreli karşılaştırılır, böylece karakter karakter tahmin edilemez. `API_KEYS` virgülle ayrılmış birden fazla anahtar alır, bu da anahtar değiştirirken eskisini kısa süre geçerli tutmayı sağlar. Tanımlı değilse doğrulama kapalıdır ve açılışta uyarı loglanır. Canlı yayın bağlantısı da aynı anahtarı el sıkışmada ister. Production'da 16 karakterden kısa anahtar kabul edilmez; bu, `dev-api-key` gibi herkesin bildiği demo anahtarlarını engeller.
-- **İki yetki seviyesi:** `API_KEYS` tam yetkilidir. `INGEST_API_KEYS` ise sadece konum gönderir, alan listesini okur ve canlı yayında kullanıcı odasına abone olur. Logları okuyamaz, alan oluşturamaz, tüm filonun canlı yayınına giremez (`403`). Herkese açık bir istemcinin (sürücü uygulaması) anahtarı sızsa bile zarar sınırlı kalır.
-- **Sürücü bağlantısı tek odada:** Sürücü anahtarıyla açılan bir canlı yayın bağlantısı aynı anda tek kullanıcı odasında durur; yeni kullanıcıya abone olunca öncekinden çıkarılır. Tek bağlantıyla tüm filo dinlenemez. Ama birden çok bağlantı açan biri başka kullanıcıları dinleyebilir; bunun çözümü son kullanıcı kimliğidir (bkz. kapsam dışı).
+- **Sürücü hesapları:** Sürücüler kullanıcı adı ve şifreyle üye olur ve giriş yapar; herkese açık istemcide paylaşılan bir anahtar yoktur. Önceki "sadece konum gönderebilen sürücü anahtarı" (`INGEST_API_KEYS`) kaldırıldı: nginx'in eklediği anahtarı herkes kullanabiliyor ve istediği `userId` adına konum gönderebiliyordu. Eski ayar verilirse API açılmaz ve ne yapılacağını söyler.
+  - **Şifreler** Argon2id ile tuzlanıp özetlenir (Node 24'ün `crypto` modülü, ek paket yok); OWASP'ın şifre saklama için ilk önerisi, parametreler de OWASP'ın verdiği ilk seçenek: 19 MiB bellek, 2 tur, 1 iş parçacığı (bu ortamda bir özet ~15 ms). Özet standart PHC biçiminde (`$argon2id$v=19$m=19456,t=2,p=1$tuz$özet`), parametreleri taşır: ileride artırılırsa eski özetler yine doğrulanır ve sürücü giriş yapınca yenilenir. İlk sürüm scrypt (N=2^14) kullanıyordu; bu OWASP'ın scrypt için verdiği asgari değerin (N=2^17) altındaydı. O özetler hâlâ doğrulanır ve girişte Argon2id'ye yenilenir. Kullanıcı adı yoksa da sahte bir özet karşılaştırılır: yanıt süresi ve mesajı ("Kullanıcı adı ya da şifre yanlış") hangi adların kayıtlı olduğunu söylemez.
+  - **Oturum** rastgele 256 bit bir token'dır; Redis'te token'ın kendisi değil SHA-256 özeti anahtar olarak, süreli (`RIDER_SESSION_TTL_HOURS`, varsayılan 24) tutulur. Çıkışta hemen silinir. JWT yerine opak token seçildi: çıkış anında geçerli olur, imza anahtarı yönetimi gerekmez; bedeli istek başına bir Redis okuması.
+  - **Kaba kuvvet:** kullanıcı adı başına 15 dakikada 10 başarısız giriş (`LOGIN_MAX_ATTEMPTS`); fazlası doğru şifreyle de `429` alır, başarılı giriş sayacı sıfırlar. IP'ye göre değil: saldırgan IP değiştirerek aynı hesabı denemeye devam edemez. Bedeli, birinin bir hesabı bilerek 15 dakika kilitleyebilmesi.
+  - **Sürücü sadece kendi scooter'ı adına:** konum gövdedeki kimlik oturumdaki kiralamayla karşılaştırılır; kiralama yoksa `409`, başka scooter için `403`. Canlı yayında da sadece kiraladığı scooter'ın odasına abone olabilir ve aynı anda tek odada durur. Tüm filonun yayını (`monitor`, `events`) API anahtarı ister.
+  - Sürücü oturumu loglara, alan oluşturmaya, filo yönetimine ve son konumlara erişemez (`403`). `/rentals` ve `/auth/me` ise sadece sürücü oturumuyla çalışır: kimin adına yapıldığı belli olmalı.
 - **Ölü bağlantılar kapatılır:** Sunucu her canlı yayın bağlantısına 10 saniyede bir ping gönderir; 20 saniye içinde cevap vermeyen bağlantı kapatılır. Uygulaması kapanmış ya da ağı kopmuş cihazların bağlantıları en geç 30 saniyede temizlenir, bellekte ve oda listelerinde birikmez (`REALTIME_PING_INTERVAL_MS`, `REALTIME_PING_TIMEOUT_MS`).
 - **Rate limit (kullanıcı başına):** Varsayılan dakikada 60 konum. 5 saniyede bir gönderen cihaz dakikada 12 istek atar, yani 5 kat pay var. Sınır IP'ye göre değil kullanıcıya göre uygulanır, çünkü mobil kullanıcılar operatör NAT'ı arkasında aynı IP'yi paylaşabilir. Sayaç Redis'te tutulduğu için birden fazla API instance'ı arasında ortaktır. Kontrol ve artırma tek bir Lua betiğinde atomik yapılır. Sayacı sınırın altında olan kullanıcının isteği, sınırı tek başına aşsa bile kabul edilir; aksi halde uzun kopukluktan sonra gelen 100 konumluk toplu istek, 60'lık sınırla hiç geçemez ve cihazın kuyruğu kalıcı olarak tıkanırdı. Bu yüzden bir kullanıcı dakikada en fazla 60 - 1 + 100 konum gönderebilir. Reddedilen istek kotadan düşmez. IP bazlı genel koruma API gateway veya load balancer katmanının işidir.
 - **CORS:** Production'da varsayılan olarak kapalıdır; `CORS_ORIGINS` ile izin verilen adresler açıkça verilir. Demo istemcileri nginx üzerinden aynı adresten sunulduğu için CORS'a ihtiyaç duymaz.
-- **Demo istemcilerinin anahtarı:** Anahtarı nginx ekler; tarayıcı kodunda görünmez. Ama bu, anahtarı saklamak anlamına gelmez: o nginx'e erişebilen herkes anahtarın yetkisiyle istek atabilir. Bu yüzden herkese açık sürücü uygulamasına sadece `INGEST_API_KEYS` yetkisi verilir. Tam yetkili operasyon uygulaması production'da iç ağda, VPN'de ya da SSO arkasında yayınlanmalıdır.
-- **Demo ortamı production değil:** `docker compose` demo için `NODE_ENV=development` ve herkesin bildiği anahtarlarla çalışır. JSON log ve kapalı CORS gibi production davranışları ise compose'ta açıkça seçildi. Gerçek ortamda `NODE_ENV=production`, `API_KEY` ve `DRIVER_API_KEY` secret olarak verilir; kısa anahtarla API açılmaz.
-- **Veritabanında en az yetki:** API ve worker, sadece yaptıkları işlere yetkili bir rolle bağlanır: `areas` için okuma ve ekleme, `area_logs` ve `user_last_location` için okuma, ekleme ve güncelleme. Silme, tablo boşaltma, şema değiştirme ve sunucuda komut çalıştırma (`COPY ... TO PROGRAM`) yetkisi yoktur. Rolü migrate betiği, şema sahibiyle çalışırken her seferinde oluşturur ya da günceller (`DB_APP_USER`, `DB_APP_PASSWORD`; `api/src/database/app-role.ts`). Şifre sunucuya düz metin değil, `psql`'in `\password` komutu gibi SCRAM-SHA-256 doğrulayıcısı olarak gönderilir: `ALTER ROLE ... PASSWORD` metni `pg_stat_statements`'a ve sunucu loglarına düşebilir. (İlk `pg_stat_statements` sürümünde şifre orada açık metin görünüyordu; kod incelemesi buldu, canlıda doğrulandı.) Şema sahibi superuser'dır ve sadece migrate'te kullanılır. Veritabanı testi, uygulamanın gerçek yazma yolunu bu rolle çalıştırır ve yasak işlemlerin reddedildiğini doğrular.
+- **Demo istemcilerinin anahtarı:** Operasyon uygulamasının anahtarını nginx ekler; tarayıcı kodunda görünmez. Ama bu, anahtarı saklamak anlamına gelmez: o nginx'e erişebilen herkes anahtarın yetkisiyle istek atabilir. Bu yüzden tam yetkili operasyon uygulaması production'da iç ağda, VPN'de ya da SSO arkasında yayınlanmalıdır. Herkese açık sürücü uygulamasının nginx'i anahtar eklemez; sürücü kendi oturumuyla gelir.
+- **Demo ortamı production değil:** `docker compose` demo için `NODE_ENV=development` ve herkesin bildiği anahtarla çalışır. JSON log ve kapalı CORS gibi production davranışları ise compose'ta açıkça seçildi. Gerçek ortamda `NODE_ENV=production` ve `API_KEY` secret olarak verilir; kısa anahtarla API açılmaz.
+- **Veritabanında en az yetki:** API ve worker, sadece yaptıkları işlere yetkili bir rolle bağlanır: `areas`, `area_logs`, `user_last_location`, `scooters` ve `rentals` için okuma, ekleme ve güncelleme (alan ve scooter silme yumuşaktır, bir güncellemedir); `riders` için okuma, ekleme ve sadece şifre özeti kolonunu güncelleme (girişte eski özet yenilenir). Kullanıcı adı değiştirme, alan, hesap, scooter ya da kiralama geçmişi silme, tablo boşaltma, şema değiştirme ve sunucuda komut çalıştırma (`COPY ... TO PROGRAM`) yetkisi yoktur. Rolü migrate betiği, şema sahibiyle çalışırken her seferinde oluşturur ya da günceller (`DB_APP_USER`, `DB_APP_PASSWORD`; `api/src/database/app-role.ts`). Şifre sunucuya düz metin değil, `psql`'in `\password` komutu gibi SCRAM-SHA-256 doğrulayıcısı olarak gönderilir: `ALTER ROLE ... PASSWORD` metni `pg_stat_statements`'a ve sunucu loglarına düşebilir. (İlk `pg_stat_statements` sürümünde şifre orada açık metin görünüyordu; kod incelemesi buldu, canlıda doğrulandı.) Şema sahibi superuser'dır ve sadece migrate'te kullanılır. Veritabanı testi, uygulamanın gerçek yazma yolunu bu rolle çalıştırır ve yasak işlemlerin reddedildiğini doğrular.
 - **Girdi doğrulama sınırları:** Zaman damgası saat dilimli olmalı ve var olan bir güne işaret etmeli; JS ile Postgres'in farklı yorumlayabileceği biçimler (`2024`, `2026-W39-1`, `20260928T100000Z`, `2026-02-30`) `400` alır. Önceden bunlar doğrulamadan geçip `500` veriyordu; sürücü uygulaması `5xx`'te tekrar denediği için tek bir böyle nokta cihazın kuyruğunu tıkayabilirdi. Sayfalama imlecindeki zaman ve kimlik de Postgres'e gitmeden doğrulanır.
 - `x-powered-by` başlığı kapalı; doğrulamada tanımsız alan içeren istekler reddedilir. JSON gövde sınırı 512 KB (10 bin köşeli polygon ~220 KB tutar).
 
@@ -213,7 +295,7 @@ Tasarım kararları, 3 milyon giriş kaydı ve 50 bin kullanıcılı ayrı bir b
 
 - **Metrikler (Prometheus):**
   - API'de: HTTP istek süresi (rota şablonu, method, durum kodu), kabul edilen ve reddedilen konumlar (`reason`: rate_limited / backpressure), kuyruk derinliği (tüm şeritler) ve en dolu şeridin derinliği.
-  - Worker'da: işleme süresi, kuyrukta bekleme süresi (`location_job_lag_seconds`), alan giriş ve çıkış sayıları, denemeleri tükenen işler.
+  - Worker'da: işleme süresi, kuyrukta bekleme süresi (`location_job_lag_seconds`), alan giriş ve çıkış sayıları, denemeleri tükenen işler, sinyal kaybıyla kapatılan girişler ve biten kiralamalar (`signal_loss_total{kind="visit"|"rental"}`). Birden çok scooter'ın aynı anda sinyal kaybetmesi (ör. hücresel kesinti) bu metrikte sıçrama olarak görünür.
   - Her ikisinde de Node süreç metrikleri.
   - Worker'ın HTTP API'si olmadığı için metrikleri ayrı bir portta (`WORKER_METRICS_PORT`, varsayılan 9100) yayınlanır.
 - **Sorgu istatistikleri:** `pg_stat_statements` açık (compose'da `shared_preload_libraries`, eklentiyi migration kurar). Yük testinden sonra hangi sorgunun toplamda ne kadar zaman harcadığı `SELECT calls, total_exec_time, query FROM pg_stat_statements ORDER BY total_exec_time DESC LIMIT 10` ile görülür. Eklenti "trusted" olmadığı için yönetilen bir veritabanında migration kullanıcısı superuser değilse bu adım atlanır; orada sağlayıcının ayarından açılır.
@@ -233,6 +315,8 @@ Yük sırasında kuyruk derinliğini izler, ardından kuyruğun boşalmasını b
 - **Worker hızı (boşalma):** yük bittiğinde kuyrukta kalan işler / boşalma süresi. Worker'lar o sırada doygun çalıştığı için kapasiteye en yakın sayı budur.
 - **Ortalama işleme:** kabul edilen konum / toplam süre (ısınma ve kuyruğun boşalması dahil). k6'nın kaç istek gönderebildiğine bağlıdır; kapasite değil, alt sınırdır. Profil (10 sn ısınma + 70 sn tepe) ~102 bin istek gönderdiği için en fazla ~1.270 çıkabilir; ısınmasız eski profilde bu tavan ~1.440'tı.
 
+Sadece kayıtlı scooterlar konum gönderebildiği için k6 başlamadan test filosunu (`load-0` … `load-4999`) `POST /scooters` ile kaydeder. Kuyruk boşalınca `run.sh` test verisini siler: veritabanında `load-*` scooterlar, son konumları, giriş kayıtları ve kiralamaları; Redis'te cihaz günlükleri. İncelemek için tutmak isteyenler `KEEP_DATA=1` verir.
+
 k6 hedef hıza ulaşamazsa (düşen istek) koşu eşikten kalır: sonuçlar başka koşularla karşılaştırılamaz. Kabul edilen konumlar ayrı bir sayaçla (`accepted_locations`) sayılır. Betik k6'nın çıkış koduyla biter.
 
 ```bash
@@ -241,7 +325,9 @@ MOVE=teleport ./loadtest/run.sh                          # eski ölçümlerle ay
 PROFILE=soak SOAK_RPS=500 SOAK_DURATION=30m ./loadtest/run.sh
 ```
 
-Ortam: MacBook, Docker VM'e ayrılmış **2 vCPU / 2 GB RAM**. API, worker'lar, Postgres, Redis ve k6 bu 2 CPU'yu paylaşıyor.
+**En son ölçüm (filo kaydı, sürücü hesapları, sinyal kaybı taraması ve cihaz günlüğüyle; `MOVE=route`, 2 worker, Docker VM'e 4 CPU / 8 GB):** 101.750 konumun hepsi kabul edildi, hata ve düşen istek 0; tepe yükte p95 0,74 ms, p99 1,9 ms; kuyrukta en fazla 8 iş birikti, yük bitince kuyruk boştu (worker'lar yüke yetişti, bu yüzden boşalma hızı ölçülemedi). Cihaz günlüğü eklenmeden önceki aynı koşu p95 0,65 ms, p99 1,6 ms idi; fark tek koşuluk ölçümde gürültü sınırında. Aşağıdaki tablolar daha önceki sürümlerle, farklı bir ortamda (`MOVE=teleport`, 2 vCPU) alındı ve bu sayılarla doğrudan karşılaştırılmamalı.
+
+Ortam (aşağıdaki ölçümler): MacBook, Docker VM'e ayrılmış **2 vCPU / 2 GB RAM**. API, worker'lar, Postgres, Redis ve k6 bu 2 CPU'yu paylaşıyor.
 
 > **Not (dayanıklılık değişikliğinden sonra):** Giriş kayıtları artık diske yazılarak onaylandığı için worker'ın işleme hızı bu ortamda yaklaşık %10 düştü (~1.240 → ~1.130 konum/sn). k6 senaryosu her istekte rastgele bir noktaya "ışınlandığı" için konum başına 0,43 giriş/çıkış üretir; bu, gerçek trafikten çok daha sık olduğu için bedeli en kötü haliyle gösterir. Aynı ölçümlerde API p95'i 105–250 ms arasında dalgalandı. `POST /locations` Postgres'e dokunmadığı ve Redis AOF'u kapatmak farkı kapatmadığı için bu dalgalanma, 2 CPU'yu paylaşan ve o sırada yük ortalaması 4 olan ortama bağlandı. Güvenilir karşılaştırma için yukarıdaki kontrollü pgbench ölçümlerine bakın.
 
@@ -281,7 +367,7 @@ Sonuçların yorumu:
 
 ## Testler
 
-Hepsi tek komutla, yaklaşık 65 saniyede çalışır (stack ayakta olmalı):
+Hepsi tek komutla, yaklaşık 50 saniyede çalışır (stack ayakta olmalı):
 
 ```bash
 docker compose up -d --build
@@ -292,33 +378,37 @@ docker compose up -d --build
 
 | | Birim | E2E | Smoke (veri yazmaz*) |
 |---|---|---|---|
-| **Backend** | 156 test · `api: npm test` | 68 test · `api: npm run test:e2e` | `api: npm run smoke` |
-| **Veritabanı** | 33 test · `api: npm run test:db` | (backend e2e içinde) | `api: npm run smoke:db` |
-| **Frontend** | 90 test · `clients: npm run test:unit` | 18 tarayıcı testi · `clients: npm run test:ui` | `clients: npm run smoke` |
+| **Backend** | 178 test · `api: npm test` | 107 test · `api: npm run test:e2e` | `api: npm run smoke` |
+| **Veritabanı** | 46 test · `api: npm run test:db` | (backend e2e içinde) | `api: npm run smoke:db` |
+| **Frontend** | 107 test · `clients: npm run test:unit` | 23 tarayıcı testi · `clients: npm run test:ui` | `clients: npm run smoke` |
 
-\* Backend smoke testi, gerçek akışı denemek için tek bir sabit test alanı ve benzersiz bir test kullanıcısıyla konum gönderir.
+\* Backend smoke testi, gerçek akışı denemek için tek bir sabit test alanı ve her koşuda benzersiz bir test scooter'ı kullanır; scooter'ı koşu başında filoya ekler, sonunda çıkarır (yumuşak silme).
+
+API testleri Node 24.7+ ister (bkz. "Yerel geliştirme"). Host'taki Node'un npm 10 sürümü `api/package-lock.json`'ı uyumsuz bulup `npm ci`'yi reddedebilir; Node 24 ile gelen npm 11 bu sorunu da çözer.
 
 Statik kontroller: `api: npm run lint && npm run typecheck` (testler dahil tam tip kontrolü), `clients: npm run typecheck`. Kapsama raporu: `api: npm run test:cov`, `clients: npm run test:cov`; hiç yüklenmeyen dosyalar da rapora dahildir (birim testlerde API ~%56, istemciler ~%51 satır; API'nin controller ve gateway'lerini e2e kapsar, bu rapora girmez).
 
 **Backend birim** (Vitest):
 - Giriş/çıkış akışı (`GeofenceService`): kilit sırası; eski konumun atlanması; commit dayanıklılığının yalnızca giriş/çıkış yokken gevşetilmesi; olayların alan bilgisiyle üretilmesi.
-- Worker'ın noktaları sırayla işlemesi; hatada noktayı işin içinde yeniden denemesi, veritabanı kapalıyken deneme sayısına takılmadan beklemesi, süre dolunca ve kalıcı hatada vazgeçmesi, beklemenin üst sınırı; hata sınıflandırması (geçici/kalıcı); kapanışta çalışan işi en fazla belirli süre beklemesi; eski biçimdeki (tek konumlu) işleri de işlemesi.
+- Worker'ın noktaları sırayla işlemesi; işteki her noktanın sonucu ve olaylarıyla cihaz günlüğüne tek seferde yazılması (atlananlar dahil); hatada noktayı işin içinde yeniden denemesi, veritabanı kapalıyken deneme sayısına takılmadan beklemesi, süre dolunca ve kalıcı hatada vazgeçmesi, beklemenin üst sınırı; hata sınıflandırması (geçici/kalıcı); kapanışta çalışan işi en fazla belirli süre beklemesi; eski biçimdeki (tek konumlu) işleri de işlemesi.
+- Kayıtlı scooter listesi (`ScooterRegistry`): liste hiç yüklenemediyse `503`, kayıtsız kimliğe `400`, veritabanı sonradan kopunca bilinen son listeyle devam, eklenen ve silinen scooter'ın aynı instance'ta hemen geçerli olması.
 - Kullanıcıların şeritlere kalıcı ve dengeli dağılması; worker'ın şerit sayısı uyuşmazsa hiçbir şeridi dinlemeden açılmayı reddetmesi.
 - Konum doğrulama, gruplama ve saat payı.
-- Kuyruk dolu koruması, kullanıcı başına rate limit, API anahtarı, istek kimliği, `Retry-After`; yerel geliştirmede sürücü anahtarı eksikse açılış uyarısı.
+- Kuyruk dolu koruması, kullanıcı başına rate limit, istek kimliği, `Retry-After`.
+- Kimlik: API anahtarı ve sürücü oturumu kuralları (hangi uç noktaya kim erişir, geçersiz token'ın anahtara geri düşmemesi); şifre özeti (Argon2id PHC biçimi ve parametreleri, tuz, Unicode normalizasyonu, ilk sürümün scrypt özetinin doğrulanıp yenilenmesi, zayıf parametrelerin yenilenmesi, bozuk özet); gönderen kontrolü (kayıtsız scooter, kiralama yok, başkasının scooter'ı, reddedilen isteğin sayaç harcamaması).
 - Canlı yayın: bozuk ya da biçimi beklenmedik Redis mesajında çökmeme, konum tamponu.
 - Redis erişilemezken alan oluşturmanın yayını beklememesi, kuyruk derinliği okumalarının birikmemesi, worker metrik portu doluyken çökmeme; Redis yokken açılışın ve kapanışın beklememesi, bağlantı hatalarının seyreltilmesi.
 - Hata filtresi: `Retry-After`, standart HTTP hataları, bozuk JSON'un `400` kalması, beklenmeyen hatanın istek kimliğiyle loglanması.
 - Zaman damgası ve sayfalama imleci doğrulaması (saat dilimi, var olmayan gün, bigint sınırı).
-- Ayar doğrulama (anahtar kuralları sadece API sunucusunda), GeoJSON doğrulama, cursor.
+- Ayar doğrulama (anahtar kuralları sadece API sunucusunda; kaldırılan `INGEST_API_KEYS` sessizce yok sayılmaz), GeoJSON doğrulama, cursor.
 
 **Veritabanı** (gerçek PostGIS):
 - **Migration'lar:** boş bir veritabanında hepsi uygulanır, tamamen geri alınır ve tekrar uygulanır. Migration bağlantısında sorgu süresi sınırsız, kilit beklemesi sınırlıdır: kilitli bir tabloda transaction dışındaki bir adım da beklemeden hata verir. Bu test, `CONCURRENTLY` index'li migration'ın geri alınamadığı bir hatayı yakaladı. Yarıda kalmış bir build'in bıraktığı INVALID index, migration tekrar çalışınca yeniden oluşturulur.
-- **Kısıtlar:** Uygulama hata yapsa bile veritabanı şunları reddeder: geçersiz poligon, yanlış geometri tipi, bilinmeyen alan tipi, çıkışın girişten önce olması, aynı alanda iki açık giriş, var olmayan alana giriş. Alan silinince kayıtları da silinir.
-- **Sorgu planı regresyonları (200 bin kayıtla):** kritik sorgular beklenen index'i kullanır, son konum güncellemeleri %95'ten fazla HOT'tur, `area_logs` temizlik eşikleri yerindedir, `pg_stat_statements` sorguları kaydeder, `statement_timeout` uzun sorguyu keser.
+- **Kısıtlar:** Uygulama hata yapsa bile veritabanı şunları reddeder: geçersiz poligon, yanlış geometri tipi, bilinmeyen alan tipi, çıkışın girişten önce olması, aynı alanda iki açık giriş, var olmayan alana giriş, açık girişte sinyal kaybı işareti; aynı scooter'ın ya da aynı sürücünün iki açık kiralaması, bitiş sebebi olmadan biten kiralama, var olmayan scooter'ın kiralanması, büyük harfli ya da boşluklu kullanıcı adı, aynı kullanıcı adı iki kez. Alan silinince kayıtları da silinir.
+- **Sorgu planı regresyonları (200 bin kayıtla):** kritik sorgular beklenen index'i kullanır, son konum güncellemeleri %95'ten fazla HOT'tur, `area_logs` temizlik eşikleri yerindedir, `pg_stat_statements` sorguları kaydeder (sorgu kimliğiyle aranır: takma adlar kimliğe girmediği için metinle aramak testlerin çalışma sırasına göre kırmızıya düşüyordu), `statement_timeout` uzun sorguyu keser.
 - **Son konumlar (`GET /locations/latest`):** zaman penceresi, en yeniden eskiye sıra (aynı saniyede kimliğe göre), limit, içinde bulunulan alanlar (kapanmış giriş sayılmaz).
-- **Uygulama rolü:** API'nin gerçek yazma yolu en az yetkili rolle çalışır; silme, boşaltma, şema değiştirme ve `COPY ... TO PROGRAM` reddedilir. Şifre `pg_stat_statements`'a düşmez; gönderilen SCRAM doğrulayıcısı Postgres'in aynı şifreden ürettiğiyle birebir aynıdır (Türkçe karakterli şifre dahil). Migration'lar kullanılmayan eklenti bırakmaz.
-- **Veritabanı smoke:** bağlantı, PostGIS, bekleyen migration, gerekli ve geçerli (INVALID olmayan) index'ler, HOT ayarı, zaman aşımları, `synchronous_commit`.
+- **Uygulama rolü:** API'nin gerçek yazma yolu en az yetkili rolle çalışır; üyelik, kiralama (satır kilidiyle), bitirme, scooter ekleme ve yumuşak silme, alan düzenleme ve yumuşak silme, sinyal kaybı güncellemesi, şifre özetinin yenilenmesi yapılabilir; silme (alan, scooter, kiralama, sürücü), kullanıcı adı değiştirme, boşaltma, şema değiştirme ve `COPY ... TO PROGRAM` reddedilir. Şifre `pg_stat_statements`'a düşmez; gönderilen SCRAM doğrulayıcısı Postgres'in aynı şifreden ürettiğiyle birebir aynıdır (Türkçe karakterli şifre dahil). Migration'lar kullanılmayan eklenti bırakmaz.
+- **Veritabanı smoke:** bağlantı, PostGIS, bekleyen migration, gerekli ve geçerli (INVALID olmayan) index'ler (tek açık kiralama ve benzersiz kullanıcı adı garantisini sağlayanlar ile kiralama geçmişi index'i dahil), HOT ayarı, zaman aşımları, `synchronous_commit`.
 
 **Backend e2e** (gerçek PostGIS + Redis, ayrı test veritabanı ve kuyruk öneki):
 - Case gereksinimlerinin madde madde doğrulanması (aşağıdaki tablo).
@@ -328,28 +418,36 @@ Statik kontroller: `api: npm run lint && npm run typecheck` (testler dahil tam t
 - Birikmiş kuyrukta aynı kullanıcının işlerinin uçtan uca sırayla işlenmesi; şeritlerden önceki kuyrukta kalmış eski biçimdeki işler.
 - İki kez takılan (donan worker'larda kalan) işin kaybolmayıp sonraki worker'da işlenmesi.
 - Kapanış sırasında sürekli gelen isteklerin hiçbirinin `500` almaması; `500` yerine `400`: çözülemeyen zaman damgaları, geçersiz imleç, bozuk JSON; `413`: gövde sınırı; 10 bin köşeli polygon kabul, fazlası açıklamalı `400`.
-- API anahtarı ve sürücü anahtarının sınırları (HTTP ve WebSocket; sürücü bağlantısının tek kullanıcı odasında tutulması), rate limit (sınırdan büyük toplu istek, reddin kotadan düşmemesi, toplu istekte bir kullanıcı sınırdaysa diğerlerinin sayacına dokunulmaması; testler dakikalık pencerenin sonuna denk gelmesin diye pencerede en az 10 sn kalınca başlar), `503` backpressure, metrikler, canlı yayın ve alan duyurusu, olay odasının (`events`) konum yayını almaması ve tam yetki istemesi, ping'e cevap vermeyen bağlantının kapatılması.
+- **Sürücüler, filo ve kiralama** (gerçek scooter listesiyle): üyelik (küçük harfe çevirme, aynı ad, geçersiz ad/şifre), giriş (yanlış şifre ile olmayan kullanıcının aynı yanıtı, 3 başarısız denemeden sonra doğru şifreye de `429`, ilk sürümün scrypt özetiyle girişte özetin Argon2id'ye yenilenmesi), çıkıştan sonra token'ın geçersizliği; kurulumdaki 5 scooter, ekleme, silme, aynı kimlikle geri ekleme, kullanımdaki scooter'ın silinememesi, sürücünün ve operasyonun farklı görünümü; kiralanan scooter'ın başkasına verilmemesi, sürücü başına tek scooter, 5 sürücü aynı anda aynı scooter'a basınca tek kiralama, 5'i de doluyken boşta scooter kalmaması, silinmiş scooter'ın kiralanamaması; kayıtsız scooter'ın reddi, eklenen scooter'ın hemen gönderebilmesi, silinenin hemen gönderememesi, sürücünün kiralamasız, başkasının scooter'ı için ve sürüş bittikten sonra gönderememesi.
+- **Alan düzenleme ve silme:** ad ve tip değişince kayıtların yeni adla görünmesi ve açık kalması; şekil küçülünce sadece dışarıda kalan scooter'ın girişinin kapanması (`AREA_CHANGED`), yeni şeklin konum işlemede hemen geçerli olması; silinen alanın listeden kalkması, girişlerinin kapanması (`AREA_REMOVED`), geçmişin kalması, yeni giriş açılmaması; boş düzenleme, geçersiz poligon ve kimlikte `400`, silinmiş alanda `404`; sürücü oturumunun alan düzenleyip silememesi.
+- **Scooter detayı:** durum, kimde, son konum, içinde bulunduğu alan, kiralamalar ve cihaz günlüğü (işlenen ve eski olduğu için atlanan konum, giriş olayı, istek kimliği); filodan çıkarılmış scooter'ın detayının açılması, hiç izi olmayan kimliğe `404`, sürücü oturumuna `403`.
+- **Sinyal kaybı:** sessiz scooter'ın açık girişinin son sinyal anıyla kapanması ve işaretlenmesi; süre dolmadan dokunulmaması; cihaz dönünce yeni giriş; iki eşzamanlı taramada tek kapanış; unutulan kiralamanın son sinyal anıyla (hiç konum yoksa başlangıçtan itibaren) bitmesi ve scooter'ın boşa çıkması.
+- API anahtarı ve sürücü oturumunun sınırları (HTTP ve WebSocket; sürücünün sadece kiraladığı scooter'ın odasına girmesi, geçersiz token'lı bağlantının kapanması, kiralamanın bağlı istemcilere duyurulması), rate limit (sınırdan büyük toplu istek, reddin kotadan düşmemesi, toplu istekte bir kullanıcı sınırdaysa diğerlerinin sayacına dokunulmaması; testler dakikalık pencerenin sonuna denk gelmesin diye pencerede en az 10 sn kalınca başlar), `503` backpressure, metrikler, canlı yayın ve alan duyurusu, olay odasının (`events`) konum yayını almaması ve tam yetki istemesi, ping'e cevap vermeyen bağlantının kapatılması.
 
 **Frontend birim** (Vitest, hook'lar için jsdom):
 - **Konum ölçümü (`useGpsSampler`):** 5 saniyede bir ölçüm; alana girince ve çıkınca beklemeden ölçüm, ardından düzenli ölçümün oradan devam etmesi; aynı alanlar içinde hareketin ve yeni tanımlanan alanın ek ölçüm yapmaması; sınırda gidip gelince saniyede en fazla bir ölçüm; sürüklerken (bırakmadan) sınır geçişi; bağlantı durumu değişince ölçümün baştan başlamaması.
-- **Gönderim kuyruğu (`useOutbox`):** kaydedilen konumun zamanlayıcıyı beklemeden gönderilmesi, çevrimdışı birikim ve tek toplu istek, 100'lük gruplar, `429`'da `Retry-After` kadar bekleme, ağ hatasında noktaları kaybetmeme, `401`'de anahtar sorununu ne yapılacağıyla gösterme. Toplu istek tek hatalı nokta yüzünden `400` alırsa grup ikiye bölünür; sadece o nokta atılır. Ardışık hatalı noktalar (ör. saati ileri cihaz) baştan bölme yapılmadan, her biri tek istekle atılır. Gönderim sürerken kuyruk dolup baştan kırpılsa bile gönderilmemiş noktalar silinmez.
-- **Giriş kayıtları (`useLogs`, `LogsView`):** eski filtrenin geç gelen yanıtı ya da önceki sonraki-sayfa isteği yeni sonucu ezmez; ekran yalnızca olay odasına abone olur; filtreye yazmak ve bir kullanıcıya tıklamak tabloyu yeniden çizmez.
+- **Gönderim kuyruğu (`useOutbox`):** kaydedilen konumun zamanlayıcıyı beklemeden gönderilmesi, çevrimdışı birikim ve tek toplu istek, 100'lük gruplar, `429`'da `Retry-After` kadar bekleme, ağ hatasında noktaları kaybetmeme, `401`'de oturumun düştüğünü bildirme, `403`/`409`'da (kiralama bitmiş) noktaları atıp kiralamayı kontrol ettirme, bırakırken bekleyen konumların gönderilmesini bekleme. Toplu istek tek hatalı nokta yüzünden `400` alırsa grup ikiye bölünür; sadece o nokta atılır. Ardışık hatalı noktalar (ör. saati ileri cihaz) baştan bölme yapılmadan, her biri tek istekle atılır. Gönderim sürerken kuyruk dolup baştan kırpılsa bile gönderilmemiş noktalar silinmez.
+- **Giriş kayıtları (`useLogs`, `LogsView`):** eski filtrenin geç gelen yanıtı ya da önceki sonraki-sayfa isteği yeni sonucu ezmez; ekran yalnızca olay odasına abone olur; kolon "Scooter", filtre kayıtlı scooterları listeler; filtre değişince ve detay paneli açılınca tablo yeniden çizilmez; satırdaki scooter'a tıklayınca panel ve cihaz günlüğü açılır, panelden filtrelenir, Esc kapatır.
 - **Canlı harita:** geç gelen ilk yükleme canlı konumun üstüne yazmaz; soluklaşma ve düşme eşikleri; sayaçlar değişmedikçe yayınlanmaz.
 - **Levhalar (`useRiderEvents`):** ekran kapanınca bekleyen levha zamanlayıcısı kalmaz; scooter değişince öncekinin levhaları ve bölgeleri ekranda kalmaz.
 - **Alan listesi (`useAreas`):** süren bir liste isteği yeni alan kaydedilmeden başlamış olabilir; duyurulan ya da kaydedilen alan sonuçta yoksa bir kez daha istenir (aynı anda gelen yenilemeler tek ek istekte birleşir), varsa istek atılmaz.
 - **Canlı sayaçlar:** "hizmet bölgesi dışında" sayısı haritadaki gri noktalarla aynı kurala dayanır.
+- **Scooter seçimi (`ScooterPicker`):** kullanımdaki scooter seçilemez; hepsi doluysa "Boşta scooter yok"; başka sürücü aynı anda aldıysa (`409`) sebep gösterilir ve liste yenilenir. **Filo listesi (`useScooters`):** duyuru gelince yenilenir; süren istek varken gelen duyurular tek ek istekte birleşir. **Filo tablosu (`FleetTable`):** kullanımdaki scooter silinemez; silme sayfa içinde onay ister. **Alan listesi (`AreaList`):** silme sayfa içinde onay ister; düzenleme ya da çizim sürerken işlem düğmeleri kapalı.
 - **Rota planlama (`useRoutePlanner`):** durak ekleme/silme, yasak bölge sınırı.
 - **Yol ağı:** yola yapıştırma, A*, yasak bölgeden kaçınma, gerçek Kadıköy verisi.
 - **API istemcisi:** tekli/toplu uç nokta, istek kimliği (HTTPS olmayan bağlamda da, ör. telefondan LAN IP ile), `ApiError`.
 - **Diğer:** geometri, sürüş bitirme kuralı, log filtreleri, olay akışı.
 
-**Frontend smoke:** İki uygulamanın sayfaları ve tüm dosyaları, sıkıştırılmış yol verisi, nginx'in API anahtarını eklemesi, sürücü uygulamasının anahtarıyla logların okunamaması. Tarayıcıda da sürücü haritası ve yol ağı ile operasyonun canlı bağlantısı, sistem durumu ve kayıtları konsol hatasız açılır.
+**Frontend smoke:** İki uygulamanın sayfaları ve tüm dosyaları, sıkıştırılmış yol verisi, operasyon nginx'inin API anahtarını eklemesi, sürücü nginx'inin eklememesi (girişsiz hiçbir veri okunamaz). Tarayıcıda da sürücünün giriş ekranı ile operasyonun canlı bağlantısı, sistem durumu, kayıtları ve filo ekranı konsol hatasız açılır. Veri yazmamak için sürücü girişi yapılmaz; harita ve scooter seçimi tarayıcı e2e testlerinde.
 
 **Frontend tarayıcı e2e** (Playwright, yüklü Chrome):
-- Sürücü ↔ servis ↔ operasyon veri alışverişi: konum, park yasak bölgeye giriş, çevrimdışı birikim, yeni alanın duyurusu.
+- Her test kendi scooter'ını filoya ekler, kendi sürücüsünü açar, arayüzden giriş yapıp scooter'ı seçer.
+- Sürücü ↔ servis ↔ operasyon veri alışverişi: konum, park yasak bölgeye giriş (kayıtlarda scooter listesiyle filtre, sağdan açılan detay panelinde kimde olduğu ve cihaz günlüğünde giriş), çevrimdışı birikim, yeni alanın duyurusu, operasyonun alanı düzenleyip silmesinin sürücüye sayfa yenilenmeden ulaşması, operasyonun filo ekranında scooter'ın bu sürücüde ve silinemez görünmesi.
+- Operasyonda kayıtlı bir alanın şeklini haritada köşe sürükleyerek değiştirme: yeni geometri kaydedilir, ad, tip ve diğer köşeler korunur.
 - Rota ve sürüklemenin yollarla ve yasak bölgelerle sınırlı olması.
-- Sürüşün sadece park alanında bitmesi.
-- Testler çalışan stack'e `ui-` önekli scooter'larla konum gönderir ve "UI testi" adlı bir alan oluşturur; `test-all.sh` bunları sonda temizler. Yine de production'a karşı çalıştırılmamalı.
+- Sürüş başlamadan scooter'ın sürüklenememesi, rota ve bağlantı bölümünün olmaması; sürüş başlayınca kendiliğinden çevrimiçi olup hareket panelinin açılması.
+- Sürüşün sadece park alanında bitmesi ve bitince scooter'ın bırakılıp tekrar boşa çıkması; çevrimdışı biriken konumların scooter bırakılmadan önce gönderilmesi (istek sırasıyla).
+- Testler çalışan stack'e `ui-` önekli scooter'lar ve sürücülerle yazar, "UI testi" adlı bir alan oluşturur; `test-all.sh` bunları (kiralamalarıyla) sonda temizler. Yine de production'a karşı çalıştırılmamalı.
 
 Smoke testleri deploy sonrası kontrol için tasarlandı: her biri 1–2 saniye sürer, `BASE_URL` / `DRIVER_URL` / `OPS_URL` / `DB_*` ile herhangi bir ortama yöneltilebilir ve başarısızlıkta 1 koduyla çıkar. Her biri bilerek bozulmuş bir ortamda denenip hatayı yakaladığı doğrulandı: yanlış anahtar, durdurulmuş worker, geri eklenmiş HOT engelleyici index, durdurulmuş operasyon uygulaması.
 
@@ -366,7 +464,7 @@ Smoke testleri deploy sonrası kontrol için tasarlandı: her biri 1–2 saniye 
 | Trafik artışı | 100 eşzamanlı kullanıcının 5 sn aralıklı konumları doğru sayıda giriş üretir |
 | Veri büyümesi | Loglar `limit` ve `nextCursor` ile tekrar ve boşluk olmadan sayfalanır |
 
-**Temiz kurulum doğrulaması:** Repoya girecek dosyalar ayrı bir klasöre kopyalandı ve farklı portlarda, boş bir veritabanıyla sıfırdan ayağa kaldırıldı (`docker compose -p ... up`). Migration, seed, smoke testi, `npm ci` sonrası lint, birim ve e2e testleri ve istemci derlemesi hepsi geçti. Host portları `POSTGRES_PORT`, `REDIS_PORT`, `API_PORT`, `OPS_PORT` ve `DRIVER_PORT` ile değiştirilebilir.
+**Temiz kurulum doğrulaması:** Stack ayrı bir proje adıyla, farklı portlarda ve boş bir veritabanıyla sıfırdan ayağa kaldırıldı (`docker compose -p geofence-temiz up`). 6 migration uygulandı, uygulama rolü oluşturuldu, seed 10 alan ekledi, kurulumdaki 5 scooter hazırdı; backend ve frontend smoke testleri geçti. (İlk sürümde aynı doğrulama repoya girecek dosyaların ayrı bir kopyasıyla, `npm ci` sonrası lint, birim ve e2e testleriyle de yapılmıştı.) Host portları `POSTGRES_PORT`, `REDIS_PORT`, `API_PORT`, `OPS_PORT` ve `DRIVER_PORT` ile değiştirilebilir.
 
 ## Demo istemcileri (case kapsamı dışında)
 
@@ -378,7 +476,10 @@ Sürücü ──konum──▶ API ──kuyruk──▶ Worker ──giriş/ç�
    └──────────────── bölge bildirimi (levha), yeni alan duyurusu ◀────────┘
 ```
 
-**Sürücü uygulaması** (`clients/driver`, :8081): Tek bir scooter'ın telefonu gibi davranır.
+**Sürücü uygulaması** (`clients/driver`, :8081): Sürücünün telefonu gibi davranır.
+- **Giriş → scooter seçimi → sürüş.** Kullanıcı adı ve şifreyle üye olunur ya da giriş yapılır. Seçim ekranı filoyu durumuyla gösterir; kullanımdakiler seçilemez, hepsi doluysa "Boşta scooter yok" yazar. Liste, bir scooter kiralanınca ya da bırakılınca sunucunun duyurusuyla (`scooters-changed`) kendiliğinden yenilenir. Oturum tarayıcıda saklanır; sayfa yenilenince giriş ve süren kiralama kaldığı yerden devam eder. Sürüş sırasında çıkış yapılamaz, önce scooter bırakılır.
+- **Sürüş başlamadan scooter hareket etmez.** Sürükleme, rota çizme, hareket paneli ve bağlantı bölümü "Sürüşü başlat"la açılır. Sürüş başlayınca uygulama kendiliğinden çevrimiçi olur ve konum göndermeye başlar.
+- **Bırakma.** Park alanında "Sürüşü bitir" scooter'ı bırakır; sürüşe hiç başlanmadıysa "Vazgeç, scooter'ı bırak" da olur. Kiralama sinyal kaybıyla sunucuda biterse uygulama bunu fark eder ("kiralaması sona erdi") ve seçim ekranına döner.
 - "Sürüşü başlat" ile o anki konum **5 saniyede bir** ölçülür ve gönderilir. Scooter haritada sürüklenir ya da çizilen bir rota oynatılır.
 - **Bölge sınırında beklemeden gönderim.** Scooter bir alana girer ya da çıkarsa (rota oynatırken ya da sürüklenirken, bırakmayı beklemeden) konum 5 saniyeyi beklemeden hemen ölçülür ve gönderilir; telefonlardaki geofence tetikli konum güncellemesi gibi. Giriş kaydını yine sunucu belirler, uygulama sadece konumu erken gönderir. Böylece levha, scooter bölgeye girdikten ~0,2 sn sonra görünür; önceden 5 saniyelik ölçüm aralığı yüzünden 3,5–5 sn sürüyordu (tarayıcıda ölçüldü). Sınırda gidip gelen scooter rate limit'e takılmasın diye iki ölçüm arasında en az 1 saniye olur.
 - **Hareket sadece yollarda.** Rota duraklarına tıklanınca, tıklanan yer en yakın yola yapıştırılır. 60 m içinde yol yoksa (arsa ortası, deniz) tıklama yok sayılır ve imleç "izin yok"a döner. Fare gezerken yoldaki hedef nokta önizlenir. Bir durağa (ya da aynı arsaya) tekrar tıklamak o durağı siler; üzerine gelinen durak kırmızıya döner ve rota kalan duraklara göre yeniden hesaplanır. Duraklar arasındaki rota yol ağı üzerinden en kısa yol olarak hesaplanır (A*); scooter köşelerden döner, binaların içinden geçmez. Sürüklenen scooter da yol üzerinde kayar.
@@ -388,22 +489,26 @@ Sürücü ──konum──▶ API ──kuyruk──▶ Worker ──giriş/ç�
   - Bu kurallar scooter'ın (sürücü uygulamasının) davranışıdır. Servis, gerçek GPS'ten gelen sürüş yasak bölge girişlerini kaydetmeye devam eder; bu girişlerin loglanmasının amacı da budur.
 - Yol ağı OpenStreetMap'ten bir kez indirilip uygulamaya konmuştur (`clients/driver/public/roads-kadikoy.json`, yaklaşık 28 bin düğüm; gzip ile ~280 KB). Uygulama çalışırken dış bir servise bağımlı değildir. Veriyi yenilemek için: `node clients/driver/scripts/fetch-roads.mjs`. Taşıt yollarının yanında bisiklet yolu, yaya caddesi ve park yolları da dahildir, merdivenler hariçtir. Scooter için tek yön kısıtı uygulanmaz. Veri © OpenStreetMap katkıcıları, ODbL lisansı.
 - Gönderimler bir kuyruktan geçer. Tek nokta `POST /locations`, birikmiş noktalar en fazla 100'lük gruplar halinde `POST /locations/batch` ile gider.
-- "Bağlantıyı kes" ile çevrimdışı olunur; noktalar kaybolmaz, bağlanınca toplu gönderilir.
+- Sürüş sırasındaki "Ağ kopmasını dene" bölümündeki "Bağlantıyı kes" ile çevrimdışı olunur (gerçek bir telefonda bu düğme olmaz; ağ kopmasını denemek içindir); noktalar kaybolmaz, bağlanınca toplu gönderilir.
 - `429` veya `503` gelirse `Retry-After` süresi kadar beklenir. `400` gelen grup atılır, çünkü tekrar gönderilse de düzelmez.
 - Her istek bir `x-request-id` taşır. "Cihaz günlüğü" neyin gönderildiğini, sunucunun ne dediğini ve istek kimliğini gösterir.
 - Bölgeye giriş ve çıkışta sunucudan gelen bildirim, trafik levhası olarak belirir. Örneğin sürüş yasak bölgede kırmızı "girilmez" levhası.
 
 **Operasyon uygulaması** (`clients/ops`, :8080):
 - **Canlı izleme:** Son 60 saniyede konum göndermiş scooter'lar aktif sayılır. 15 saniyedir sessiz olan soluk görünür; sürüş bitmiş, sekme kapanmış ya da bağlantı kopmuş olabilir. 60 saniyede listeden düşer. Scooter'lar bulundukları bölgeye göre renklenir. Yanında anlık sayaçlar ve giriş/çıkış akışı var. Konumlar sunucuda 200 ms'lik gruplar halinde gönderilir; tarayıcıda React state'ine girmeden doğrudan Leaflet katmanında güncellenir.
-- **Giriş kayıtları:** `GET /logs` üzerinde kullanıcı, alan, durum (içeride veya çıkmış) ve giriş zamanı aralığı filtreleri. Cursor ile "daha fazla göster" ve kalış süresi. Yeni girişler geldikçe "N yeni giriş" bildirimi çıkar. Bu ekran canlı yayında yalnızca olay odasına (`events`) abone olur: tüm filonun konum yayınını (200 ms'de bir) almaz. Filtreye yazmak ya da yeni giriş sayacı tabloyu yeniden çizmez.
-- **Alanlar:** Çokgen veya dikdörtgen çizilip kaydedilir. Servis yeni alanı Redis üzerinden duyurur (`areas-changed`); açık sürücü uygulamaları haritayı sayfa yenilemeden günceller.
+- **Giriş kayıtları:** `GET /logs` üzerinde scooter (filodaki kayıtlı scooterlar listelenir), alan, durum (içeride veya çıkmış) ve giriş zamanı aralığı filtreleri. Tablodaki scooter'a tıklayınca sağdan detay paneli açılır: durum ve kimde olduğu, son sinyal ve koordinat, içinde bulunduğu alanlar, cihaz günlüğü (sunucunun işlediği son konumlar; işlendi, eski olduğu için atlandı, girdi/çıktı; cihaz saati, gecikme, istek kimliği), son kiralamalar ve "bu scooter'ın kayıtlarını göster". Panel açıkken 5 sn'de bir yenilenir, Esc ya da × ile kapanır; tablo arkada kullanılabilir kalır. Cursor ile "daha fazla göster" ve kalış süresi. Yeni girişler geldikçe "N yeni giriş" bildirimi çıkar. Bu ekran canlı yayında yalnızca olay odasına (`events`) abone olur: tüm filonun konum yayınını (200 ms'de bir) almaz. Filtreye yazmak ya da yeni giriş sayacı tabloyu yeniden çizmez.
+- **Alanlar:** Çokgen veya dikdörtgen çizilip kaydedilir. Listeden "Düzenle" ile ad ve tip formda, şekil haritada köşeleri sürükleyerek değiştirilir (kenar ortasındaki noktadan yeni köşe eklenir); "Sil" sayfa içinde onay ister. Servis her değişikliği Redis üzerinden duyurur (`areas-changed`); açık sürücü uygulamaları haritayı sayfa yenilemeden günceller.
+- **Scooterlar:** Filo; her scooter'ın durumu (boşta ya da kimde), kiralamanın başladığı an ve son sinyal. Scooter eklenir ve silinir (sayfa içinde onayla; kullanımdaki silinemez). Liste kiralama ve bırakmalarla canlı güncellenir.
+- **Giriş kayıtlarında çıkış sebebi:** Alan dışından konum gelmeden kapanan çıkışlar etiketle görünür: "Sinyal kaybı", "Alan değişti", "Alan silindi".
 - Üst çubukta `/health`'ten beslenen sistem durumu: veritabanı, Redis ve kuyrukta bekleyen konumlar.
 
-Ortak kod (`clients/shared`): API istemcisi, harita, levhalar, bölge renkleri ve stiller. API anahtarı tarayıcı koduna gömülmez; üretimde nginx, geliştirmede Vite proxy'si ekler. Sürücü uygulaması sadece konum gönderebilen anahtarı kullanır (bkz. Güvenlik).
+Ortak kod (`clients/shared`): API istemcisi (sürücü oturumunu `Authorization` başlığıyla ekler), harita, levhalar, bölge renkleri, filo listesi ve stiller. API anahtarı tarayıcı koduna gömülmez; operasyon için üretimde nginx, geliştirmede Vite proxy'si ekler. Sürücü uygulaması anahtar kullanmaz (bkz. Güvenlik).
 
-**Demo filosu:** Operasyon ekranını doldurmak için `node loadtest/fleet.mjs 50`. Kadıköy'de rastgele dolaşan 50 scooter, her biri 5 saniyede bir konum gönderir.
+**Demo filosu:** Operasyon ekranını doldurmak için `node loadtest/fleet.mjs 50`. Kadıköy'de rastgele dolaşan 50 scooter (`fleet-001` …), her biri 5 saniyede bir konum gönderir. Filo başta kaydedilir, Ctrl+C ile filodan çıkarılır.
 
 ## Yerel geliştirme (Docker'sız API)
+
+API **Node.js 24.7 veya üstü** ister (`api/.nvmrc`, `package.json` → `engines`): şifre özeti Node'un yerleşik Argon2'sini kullanır. Daha eski bir Node'la API açılmaz ve sürümü söyleyen bir hata verir. Docker imajı zaten Node 24 kullanır.
 
 ```bash
 docker compose up -d postgres redis
@@ -416,33 +521,43 @@ npm run dev:ops                   # operasyon :5173 (API'ye proxy'ler)
 npm run dev:driver                # sürücü :5174
 ```
 
-Geliştirme proxy'si sürücü uygulaması için `dev-driver-key`, operasyon için `dev-api-key` gönderir; ikisi de `api/.env` içinde tanımlı olmalı (`API_KEYS`, `INGEST_API_KEYS`). Eski bir `.env`'de sürücü anahtarı yoksa API açılışta bunu uyarır, sürücü uygulamasının cihaz günlüğü de `401`'de ne ekleneceğini gösterir.
+Geliştirme proxy'si operasyon için `dev-api-key` gönderir (`api/.env` içinde `API_KEYS`). Sürücü uygulaması anahtar göndermez; sürücü hesabıyla giriş yapılır. Eski bir `.env`'de `INGEST_API_KEYS` kalmışsa API açılmaz ve satırın silinmesini söyler.
 
 ## Ayarlar, sınırlar ve enum'lar
 
-Değerler elle yazılmaz; her biri tek bir yerde tanımlıdır ve kod oradan okur:
+Değerler elle yazılmaz; her biri kendi katmanında tek bir yerde tanımlıdır ve kod oradan okur:
 
-- **Ortama göre değişenler: `api/src/config/configuration.ts`.** Veritabanı, Redis, şerit sayısı, yeniden deneme, kilit süreleri, rate limit, CORS, ping aralığı gibi değerler env ile verilir. Servis açılırken hepsi doğrulanır; geçersiz değer varsayılana düşmez (bkz. "Ayarlar açılışta doğrulanır"). Liste ve varsayılanlar: `api/.env.example`.
-- **API sözleşmesinin sınırları: `api/src/config/limits.ts`.** `userId` biçimi ve uzunluğu, toplu istekteki en fazla konum, saat farkı payı, sayfa boyutları, alan adı uzunluğu, polygon köşe sınırı. Bunlar istemcilerin gördüğü davranışı belirlediği için env ile değil, kodda ve tek yerde durur; DTO doğrulamaları ve Swagger belgesi de buradan okur.
-- **Enum'lar:** alan tipi, giriş/çıkış, anahtar yetkisi, işleme sonucu, ret sebebi (metrik etiketi), health durumları, Socket.IO olay adları, log biçimi ve ortam. API'de her biri kendi özelliğinin yanında bir `*.enum.ts` dosyasındadır. İstemcilerde karşılıkları `clients/shared/src/api/types.ts` ve `clients/shared/src/realtime/events.ts` içinde `as const` nesneleridir: kullanımı enum gibidir (`AreaType.PARKING`), tipi API'den gelen JSON değerleriyle doğrudan uyumludur. İki taraftaki tanımlar aynı değerleri taşır; biri değişirse diğeri de değişmeli.
-- **İstemci ayarları:** `clients/driver/src/config.ts` (5 sn ölçüm, gönderim kuyruğu sınırları, levha süresi, yol yapışma mesafeleri) ve `clients/ops/src/config.ts` (canlı haritada aktiflik süreleri, olay akışı ve sayfa boyutları, durum yenileme aralığı).
+| Ne | Nerede | Nasıl değişir |
+|---|---|---|
+| Sunucunun ortama göre değişen ayarları (veritabanı, Redis, şerit sayısı, yeniden deneme, rate limit, CORS, sürücü oturum süresi, başarısız giriş sınırı, sinyal kaybı süresi, cihaz günlüğü) | `api/src/config/configuration.ts` (liste: `api/.env.example`, Docker'da `docker-compose.yml` → `x-api-env`) | Ortam değişkeni; servis açılırken doğrulanır, geçersiz değerle açılmaz. Docker'da proje kökündeki `.env` ile (ör. `SIGNAL_LOSS_TIMEOUT_MS=300000`) verilip `docker compose up -d api worker` ile uygulanır |
+| API sözleşmesinin ve iç işleyişin sabitleri (scooter kimliği biçimi, toplu istek boyutu, saat payı, sayfa boyutları, ad uzunlukları, kullanıcı adı/şifre kuralları, şifre özeti parametreleri, filo listesi yenileme, sinyal kaybı grup boyu) | `api/src/config/limits.ts` | Kodda; değiştirmek istemcilerin gördüğü davranışı değiştirebilir |
+| API sınırlarının istemcideki karşılıkları (formlar) | `clients/shared/src/api/limits.ts` | API'deki `limits.ts` ile birlikte |
+| Konum gönderme aralığı (**5 sn**, `GPS_INTERVAL_MS`), bölge sınırında ölçüm aralığı, gönderim kuyruğu sınırları, levha süresi, yol yapışma mesafeleri, oturumun saklandığı anahtar | `clients/driver/src/config.ts` | Kodda; sürücü uygulaması yeniden derlenir (`docker compose up -d --build driver`) |
+| Canlı haritada soluklaşma/düşme süreleri, olay akışı ve sayfa boyutları, durum ve detay paneli yenileme aralıkları | `clients/ops/src/config.ts` | Kodda; operasyon uygulaması yeniden derlenir |
+| İki uygulamanın ortak ayarı (filo listesinin yedek yenileme aralığı) | `clients/shared/src/config.ts` | Kodda |
+
+Birbirine bağlı ayarlar: konum aralığı kısalırsa `RATE_LIMIT_USER_PER_MIN` (varsayılan 60, 5 sn'lik gönderim dakikada 12 istek), `DEVICE_LOG_SIZE` (50 konum ≈ 4 dk) ve operasyon ekranının soluklaşma süreleri de gözden geçirilmeli.
+
+**Enum'lar:** API'de her biri kendi özelliğinin yanında bir `*.enum.ts` dosyasındadır: alan tipi, giriş/çıkış, çıkış sebebi, scooter durumu, kiralama bitiş sebebi, filo duyurusu türü, cihaz günlüğü sonucu, kimlik türü (servis/sürücü) ve erişim düzeyi, işleme sonucu, metrik etiketleri (ret sebebi, sinyal kaybı türü), Postgres hata kodları, health durumları, Socket.IO olay adları, log biçimi ve ortam. İstemcilerde API enum'larının karşılıkları `clients/shared/src/api/types.ts` ve `clients/shared/src/realtime/events.ts` içinde `as const` nesneleridir: kullanımı enum gibidir (`AreaType.PARKING`), tipi API'den gelen JSON değerleriyle doğrudan uyumludur; biri değişirse diğeri de değişmeli. Uygulamaya özel olanlar (hareket modu, cihaz günlüğü satır türü, sürüşün bitiş şekli, ekran akışı) kullanıldıkları özelliğin yanında `as const` nesneleridir.
 
 ## Proje yapısı
 
 ```
 api/src/
-  areas/        POST/GET /areas, GeoJSON doğrulama
+  areas/        /areas: oluşturma, listeleme, düzenleme ve yumuşak silme (açık girişlerin kapanması), GeoJSON doğrulama
   locations/    yazma: POST /locations(/batch) → doğrulama ve gruplama (location-jobs), backpressure, kuyruk
                 okuma: GET /locations/latest (LatestLocationsService)
-  geofence/     giriş/çıkış tespiti: GeofenceService (akış) + GeofenceRepository (SQL); şerit worker'ları (LaneWorkers) ve LocationProcessor
+  geofence/     giriş/çıkış tespiti: GeofenceService (akış) + GeofenceRepository (SQL); şerit worker'ları (LaneWorkers), LocationProcessor ve sinyal kaybı taraması (SignalLossSweeper)
   logs/         GET /logs (giriş kayıtları), keyset sayfalama
   realtime/     RealtimeSubscriber (Redis) → RealtimeGateway (Socket.IO odaları), PositionBuffer, CORS adaptörü
   queue/        kullanıcı şeritleri (LocationLanes: şerit kuyrukları, ekleme, sayımlar), şerit hash'i, iş biçimi
-  security/     API anahtarı guard'ı (tam / sadece konum yetkisi), Swagger dekoratörü, kullanıcı başına rate limit
+  security/     kimlik: AuthGuard (API anahtarı ya da sürücü oturumu), erişim dekoratörleri (@AllowRiders, @RidersOnly), RiderSessions (Redis), kullanıcı başına rate limit
+  riders/       sürücü hesabı: POST /auth/register|login|logout, GET /auth/me; şifre özeti (Argon2id), başarısız giriş sınırı
+  fleet/        filo ve kiralama: /scooters (liste, detay, ekle, sil), /rentals; ScooterRegistry (bellekte kayıt listesi), kiralama önbelleği, filo duyuruları, cihaz günlüğü (DeviceLog)
   metrics/      Prometheus metrik tanımları ve /metrics
   health/       /health
   config/       doğrulanan ayarlar (ConfigError), API sınırları (limits.ts), ortam/log enum'ları, CORS, logger, .env yükleme
-  common/       http/ (istek kimliği, erişim logu, Retry-After), redis/ (bağlantı)
+  common/       http/ (istek kimliği, erişim logu, Retry-After), redis/ (bağlantı), database/ (Postgres hata kodları)
   database/     TypeORM ayarları, migration, migrate scripti
 api/test/       e2e testleri
 clients/                       iki istemci (npm workspaces); özelliğe göre klasörlenmiş
@@ -451,37 +566,43 @@ clients/                       iki istemci (npm workspaces); özelliğe göre kl
     map/        BaseMap, ZoomButtons, AreasLayer
     zones/      bölge renkleri/etiketleri, trafik levhası ikonları, lejant
     realtime/   Socket.IO bağlantısı
-    hooks/      useAreas (alan listesi, areas-changed ile yenilenir)
+    hooks/      useAreas (alan listesi, areas-changed ile yenilenir), useScooters (filo, scooters-changed ile yenilenir)
     styles/     base (renk/tipografi), layout (kabuk/panel/form), map (Leaflet)
   driver/src/                  sürücü uygulaması
-    DriverScreen.tsx           parçaları birbirine bağlayan ekran
+    App.tsx                    ekran akışı: giriş → scooter seçimi → sürüş
+    account/    giriş/üyelik ekranı, scooter seçimi, oturumun saklanması
+    DriverScreen.tsx           sürüş ekranı: parçaları birbirine bağlar
     config.ts                  5 sn, başlangıç noktası, yapışma mesafesi...
     geo/        LatLng, mesafe, poligon içinde mi, bölgeye uzaklık (saf fonksiyonlar)
     roads/      RoadNetwork (yola yapıştırma, A*, yasak bölge kısıtları), yükleyici, testler
     route/      rota planlama ve oynatma hook'ları, harita çizimi, hareket paneli
-    rider/      scooter imleci, konum, soket olayları → levhalar, scooter kimliği
+    rider/      scooter imleci, konum, soket olayları → levhalar
     device/     gönderim kuyruğu (useOutbox), GPS örnekleyici (5 sn + bölge sınırında hemen), bağlantı paneli, cihaz günlüğü
-    ride/       sürüş paneli, "sadece park alanında biter" kuralı (+test)
+    ride/       sürüş paneli, "sadece park alanında biter" kuralı (+test), kiralamanın sunucuda bitip bitmediğini izleme
     styles/     levhalar, imleçler, cihaz günlüğü
   ops/src/                     operasyon uygulaması
     live/       canlı harita (ScooterLayer), sayaçlar, olay akışı (+test)
     logs/       giriş kayıtları: filtreler (+test), tablo, sayfalama hook'u
-    areas/      alan çizimi (Geoman), alan formu ve listesi
+    areas/      alan çizimi (Geoman), şekil düzenleme (EditShape), alan formu, listesi (düzenle, onaylı sil)
+    fleet/      filo ekranı: scooter ekleme, tablo (sayfa içi silme onayı); sağdan açılan scooter detay paneli (ScooterDrawer)
     SystemStatus.tsx           /health'ten servis durumu
-  e2e/                         iki uygulama arası tarayıcı testleri (Playwright)
-loadtest/       k6 yük testi, demo filosu (fleet.mjs)
+  e2e/                         iki uygulama arası tarayıcı testleri (Playwright), test sürücüsü/scooter yardımcıları
+loadtest/       k6 yük testi (test filosunu kaydeder, sonda siler), demo filosu (fleet.mjs)
 ```
 
 ## Bilinçli olarak kapsam dışı bırakılanlar
 
 Bunlar production için sıradaki adımlar olur:
 
-- **Son kullanıcı kimliği.** API anahtarı istemci uygulamayı doğrular; `userId` hâlâ istek gövdesinden geliyor. Sürücü anahtarını bilen biri başka bir `userId` adına konum gönderebilir ya da o kullanıcının canlı yayın odasına abone olabilir (bağlantı başına tek oda sınırı bunu sadece zorlaştırır). Mobil cihaz servisi doğrudan çağıracaksa `userId`, gövde yerine imzalı bir token'dan (JWT) alınmalı.
+- **Operasyon paneli için yönetici girişi.** Panel tam yetkili API anahtarıyla çalışır ve iç ağda, VPN ya da SSO arkasında durduğu varsayılır. Yönetici hesapları, rolleri ve işlem geçmişi (kim hangi scooter'ı sildi) yok.
+- **Scooter'ın kendi cihaz kimliği.** Park halindeki scooter'ların konumu tam yetkili API anahtarıyla (mobil backend ya da filo yönetim sistemi üzerinden) gelir. Scooter'lar servisi doğrudan çağıracaksa her cihaza kendi anahtarı ya da sertifikası verilmeli; o anahtar sadece kendi kimliği için gönderebilmeli.
+- **Hesap işlemleri.** Şifre sıfırlama, e-posta/telefon doğrulama, hesap silme, üyelikte bot koruması (IP bazlı sınır ya da CAPTCHA gateway katmanında) yok.
+- **Kiralamanın sunucu kuralları ve ücretlendirme.** "Sadece park alanında bitir" kuralı sürücü uygulamasında; sunucu bitişte scooter'ın konumuna bakmıyor. Ödeme, fiyatlandırma, kiralama geçmişi ekranı ve "bakımda" gibi elle verilen scooter durumları yok.
 - **Veri saklama ve partitioning.** `area_logs` sınırsız büyür. İlk adım: belirli günden eski kapanmış kayıtları küçük partiler halinde silen zamanlanmış bir iş. Asıl çözüm aylık partitioning ve eski ayları `DROP PARTITION` ile silmek; ancak "aynı alanda tek açık giriş" garantisi partition'lı tabloda tek bir unique index'le sağlanamaz. Önerilen tasarım: açık girişleri küçük ayrı bir partition'da tutmak (unique index orada), kapanan kayıt çıkışta zaman partition'ına taşınır.
-- **Alan güncelleme ve silme.** Bir alanın geometrisi değişince içinde bulunan kullanıcıların durumunun yeniden hesaplanması gerekir.
 - **Canlı yayın güvenilirliği.** Yayın şu an "en iyi çaba" ile yapılıyor; log zaten DB'de olduğu için veri kaybı yok. Yayının garanti olması gerekirse outbox deseni kullanılabilir.
 - **Alarm ve dashboard.** Metrikler yayınlanıyor, ama Prometheus, Grafana ve alarm kuralları (örneğin kuyrukta bekleme süresi 30 saniyeyi aşarsa) kurulu değil.
 - **Dağıtık izleme (OpenTelemetry).** Şimdilik istek kimliği ile sınırlı.
+- **Sürekli entegrasyon ve deploy.** Testler tek komutla (`scripts/test-all.sh`) çalışır, ama her commit'te çalıştıran bir pipeline, container sağlık kontrolleri (API ve worker için ayrı liveness/readiness) ve deploy manifest'leri yok. TLS'in önündeki gateway ya da load balancer'da sonlandığı varsayılır.
 
 ## Claude Code skill'leri
 

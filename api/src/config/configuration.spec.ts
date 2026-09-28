@@ -135,23 +135,16 @@ describe('loadConfig doğrulama', () => {
         apiProblems({ NODE_ENV: 'production', API_KEYS: 'dev-api-key' }),
       ).toEqual([expect.stringMatching(/en az 16 karakter/)]);
       expect(
-        apiProblems({
-          NODE_ENV: 'production',
-          API_KEYS: strong,
-          INGEST_API_KEYS: 'dev-driver-key',
-        }),
+        apiProblems({ NODE_ENV: 'production', API_KEYS: `${strong},kisa` }),
       ).toEqual([expect.stringMatching(/en az 16 karakter/)]);
       // Geliştirmede kısa anahtar serbest.
       expect(apiProblems({ API_KEYS: 'dev-api-key' })).toEqual([]);
     });
 
-    it('sürücü anahtarı tek başına ya da tam yetkili anahtarla aynı olamaz', () => {
-      expect(apiProblems({ INGEST_API_KEYS: 'd' })).toEqual([
-        expect.stringMatching(/API_KEYS de verilmeli/),
-      ]);
-      expect(apiProblems({ API_KEYS: 'a,b', INGEST_API_KEYS: 'b' })).toEqual([
-        expect.stringMatching(/hem API_KEYS hem INGEST_API_KEYS/),
-      ]);
+    it('kaldırılan sürücü anahtarı (INGEST_API_KEYS) sessizce yok sayılmaz', () => {
+      expect(
+        apiProblems({ API_KEYS: 'a', INGEST_API_KEYS: 'dev-driver-key' }),
+      ).toEqual([expect.stringMatching(/INGEST_API_KEYS kaldırıldı/)]);
     });
   });
 

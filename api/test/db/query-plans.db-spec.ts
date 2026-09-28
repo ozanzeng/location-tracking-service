@@ -129,11 +129,29 @@ describe('Sorgu planları ve performans ayarları', () => {
   });
 
   it('pg_stat_statements sorguları kaydeder (yük testinde darboğazı bulmak için)', async () => {
-    await ds.query(`SELECT 42 AS pgss_probe`);
-    const [{ calls }] = await ds.query(
-      `SELECT coalesce(sum(calls), 0)::int AS calls FROM pg_stat_statements WHERE query LIKE '%pgss_probe%'`,
+    // Sorgu kimliğiyle aranır, metinle değil: takma adlar kimliğe girmez, "SELECT 42 AS x"
+    // ile başka bir yerdeki "SELECT 1" (ör. health) aynı kayda düşer ve kayıtta önce gelenin
+    // metni kalır. Metinle aramak, testlerin çalışma sırasına göre kırmızıya düşüyordu.
+    const probe = 'SELECT 42 AS pgss_probe';
+    // Metin biçiminden okunur: 64 bitlik kimlik JSON sayısı olarak hassasiyet kaybeder.
+    const lines: Array<{ 'QUERY PLAN': string }> = await ds.query(
+      `EXPLAIN (VERBOSE) ${probe}`,
     );
-    expect(calls).toBeGreaterThan(0);
+    const queryId = lines
+      .map((l) => /Query Identifier: (-?\d+)/.exec(l['QUERY PLAN'])?.[1])
+      .find(Boolean);
+    expect(queryId).toBeDefined();
+    const calls = async () =>
+      (
+        await ds.query(
+          `SELECT coalesce(sum(calls), 0)::int AS calls FROM pg_stat_statements
+            WHERE queryid = $1::bigint AND dbid = (SELECT oid FROM pg_database WHERE datname = current_database())`,
+          [queryId],
+        )
+      )[0].calls as number;
+    const before = await calls();
+    await ds.query(probe);
+    expect(await calls()).toBe(before + 1);
   });
 
   it('statement_timeout uzun sorguyu keser', async () => {

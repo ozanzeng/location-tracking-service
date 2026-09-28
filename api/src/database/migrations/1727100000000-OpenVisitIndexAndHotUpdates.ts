@@ -58,7 +58,7 @@ export class OpenVisitIndexAndHotUpdates1727100000000 implements MigrationInterf
  * olarak kalır: sorgular kullanmaz ama yazmalar onu güncellemeye devam eder. IF NOT EXISTS
  * onu "var" sayıp atlayacağı için migration tekrar çalıştırıldığında önce kaldırılır.
  */
-async function dropIfInvalid(
+export async function dropIfInvalid(
   queryRunner: QueryRunner,
   name: string,
 ): Promise<void> {

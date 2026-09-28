@@ -1,6 +1,17 @@
-import { BadRequestException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+} from '@nestjs/common';
+import type { RentalsService } from '../fleet/rentals.service.js';
+import type { ScooterRegistry } from '../fleet/scooter-registry.js';
 import type { Mock } from 'vitest';
 import type { LocationLanes } from '../queue/location-lanes.js';
+import { PrincipalKind } from '../security/principal-kind.enum.js';
+import {
+  type RiderPrincipal,
+  SERVICE_PRINCIPAL,
+} from '../security/principal.js';
 import type { UserRateLimiter } from '../security/user-rate-limiter.js';
 import { LocationsService } from './locations.service.js';
 import type { QueueBackpressure } from './queue-backpressure.js';
@@ -13,6 +24,8 @@ describe('LocationsService', () => {
   let addMany: Mock<LocationLanes['addMany']>;
   let consume: Mock<UserRateLimiter['consume']>;
   let assertCapacity: Mock<QueueBackpressure['assertCapacity']>;
+  let assertRegistered: Mock<ScooterRegistry['assertRegistered']>;
+  let activeScooter: Mock<RentalsService['activeScooter']>;
   let service: LocationsService;
 
   beforeEach(() => {
@@ -22,10 +35,16 @@ describe('LocationsService', () => {
       .mockImplementation(async (jobs) => jobs.map((_, i) => `5:${i + 1}`));
     consume = vi.fn<UserRateLimiter['consume']>().mockResolvedValue(undefined);
     assertCapacity = vi.fn<QueueBackpressure['assertCapacity']>();
+    assertRegistered = vi.fn<ScooterRegistry['assertRegistered']>();
+    activeScooter = vi
+      .fn<RentalsService['activeScooter']>()
+      .mockResolvedValue(null);
     service = new LocationsService(
       { add, addMany } as unknown as LocationLanes,
       { consume } as unknown as UserRateLimiter,
       { assertCapacity } as unknown as QueueBackpressure,
+      { assertRegistered } as unknown as ScooterRegistry,
+      { activeScooter } as unknown as RentalsService,
     );
   });
 
@@ -33,6 +52,7 @@ describe('LocationsService', () => {
     it('konumu istemcinin timestamp’iyle (UTC) ve istek kimliğiyle kuyruğa atar', async () => {
       const result = await service.enqueue(
         { userId: 'u', lat: 1, lng: 2, timestamp: '2026-09-25T09:59:00+03:00' },
+        SERVICE_PRINCIPAL,
         'req-1',
         now,
       );
@@ -57,6 +77,7 @@ describe('LocationsService', () => {
             lng: 2,
             timestamp: '2026-09-25T10:00:30.000Z',
           },
+          SERVICE_PRINCIPAL,
           undefined,
           now,
         ),
@@ -72,6 +93,7 @@ describe('LocationsService', () => {
             lng: 2,
             timestamp: '2026-09-25T10:05:00.000Z',
           },
+          SERVICE_PRINCIPAL,
           undefined,
           now,
         ),
@@ -87,6 +109,7 @@ describe('LocationsService', () => {
       await expect(
         service.enqueue(
           { userId: 'u', lat: 1, lng: 2, timestamp: ts },
+          SERVICE_PRINCIPAL,
           undefined,
           now,
         ),
@@ -99,6 +122,7 @@ describe('LocationsService', () => {
       await expect(
         service.enqueue(
           { userId: 'u', lat: 1, lng: 2, timestamp: ts },
+          SERVICE_PRINCIPAL,
           undefined,
           now,
         ),
@@ -120,6 +144,7 @@ describe('LocationsService', () => {
           { userId: 'b', lat: 2, lng: 2, timestamp: ts },
           { userId: 'a', lat: 1, lng: 1, timestamp: ts },
         ],
+        SERVICE_PRINCIPAL,
         'req-2',
         now,
       );
@@ -156,10 +181,71 @@ describe('LocationsService', () => {
             { userId: 'a', lat: 1, lng: 1, timestamp: ts },
             { userId: 'a', lat: 1, lng: 1, timestamp: '2027-01-01T00:00:00Z' },
           ],
+          SERVICE_PRINCIPAL,
           undefined,
           now,
         ),
       ).rejects.toThrow('locations.1.timestamp');
+      expect(addMany).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('gönderen', () => {
+    const rider: RiderPrincipal = {
+      kind: PrincipalKind.RIDER,
+      riderId: 'r1',
+      username: 'ali',
+    };
+    const at = (userId: string) => ({ userId, lat: 1, lng: 2, timestamp: ts });
+
+    it('API anahtarı: kayıtlı olmayan scooter reddedilir, sayaç harcanmaz', async () => {
+      assertRegistered.mockImplementation(() => {
+        throw new BadRequestException('Kayıtlı olmayan scooter: x');
+      });
+      await expect(
+        service.enqueue(at('x'), SERVICE_PRINCIPAL, undefined, now),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(consume).not.toHaveBeenCalled();
+      expect(add).not.toHaveBeenCalled();
+    });
+
+    it('API anahtarı: toplu istekteki her scooter kontrol edilir; kiralama aranmaz', async () => {
+      await service.enqueueBatch(
+        [at('a'), at('b')],
+        SERVICE_PRINCIPAL,
+        undefined,
+        now,
+      );
+      expect(assertRegistered).toHaveBeenCalledWith(['a', 'b']);
+      expect(activeScooter).not.toHaveBeenCalled();
+    });
+
+    it('sürücü: kiraladığı scooter için kabul edilir', async () => {
+      activeScooter.mockResolvedValue('scooter-01');
+      await expect(
+        service.enqueue(at('scooter-01'), rider, undefined, now),
+      ).resolves.toBeDefined();
+      expect(activeScooter).toHaveBeenCalledWith('r1');
+    });
+
+    it('sürücü: aktif kiralama yoksa 409', async () => {
+      await expect(
+        service.enqueue(at('scooter-01'), rider, undefined, now),
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(add).not.toHaveBeenCalled();
+    });
+
+    it('sürücü: başka bir scooter adına gönderemez (toplu istekte tek biri bile)', async () => {
+      activeScooter.mockResolvedValue('scooter-01');
+      await expect(
+        service.enqueueBatch(
+          [at('scooter-01'), at('scooter-02')],
+          rider,
+          undefined,
+          now,
+        ),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(consume).not.toHaveBeenCalled();
       expect(addMany).not.toHaveBeenCalled();
     });
   });
